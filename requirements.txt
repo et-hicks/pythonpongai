@@ -1,0 +1,5 @@
+arcade>=2.6.17
+torch>=2.1
+numpy>=1.24
+rich>=13.7
+pygame>=2.5

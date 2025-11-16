@@ -9,7 +9,7 @@ WINDOW_WIDTH = 1200
 WINDOW_HEIGHT = 800
 
 PADDLE_WIDTH = 20
-PADDLE_HEIGHT = 200
+PADDLE_HEIGHT = 180
 PADDLE_SPEED = 9
 BALL_RADIUS = 14
 BALL_SPEED = 8
@@ -76,6 +76,8 @@ class PongGame:
         self.font = pygame.font.SysFont("monospace", font_size, bold=True)
         self.left_score = 0
         self.right_score = 0
+        self.left_penalties = 0
+        self.right_penalties = 0
 
         left_rect = pygame.Rect(
             40, WINDOW_HEIGHT // 2 - PADDLE_HEIGHT // 2, PADDLE_WIDTH, PADDLE_HEIGHT
@@ -144,10 +146,14 @@ class PongGame:
         if self.ball.rect.right < 0:
             if scored_ball:
                 self.right_score += 1
+            else:
+                self.left_penalties += 1
             self.ball.reset()
         elif self.ball.rect.left > WINDOW_WIDTH:
             if scored_ball:
                 self.left_score += 1
+            else:
+                self.right_penalties += 1
             self.ball.reset()
 
     def _render(self) -> None:
@@ -158,7 +164,8 @@ class PongGame:
         pygame.draw.rect(self.screen, self.right_paddle.color, self.right_paddle.rect)
         self.ball.draw(self.screen)
         score_text = self.font.render(
-            f"LEFT: {self.left_score}    RIGHT: {self.right_score}",
+            f"LEFT: {self.left_score} (P{self.left_penalties})    "
+            f"RIGHT: {self.right_score} (P{self.right_penalties})",
             True,
             SCORE_COLOR,
         )

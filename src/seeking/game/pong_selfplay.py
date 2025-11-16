@@ -15,6 +15,7 @@ from seeking.game.pong import (
     LEFT_COLOR,
     NET_COLOR,
     Paddle,
+    PADDLE_HEIGHT,
     PADDLE_WIDTH,
     RIGHT_COLOR,
     SCORE_COLOR,
@@ -28,6 +29,7 @@ from seeking.rl.pong_policy import PongPolicyNetwork
 HIT_REWARD = 0.4
 SCORE_REWARD = 1.0
 SCORE_PENALTY = 1.0
+UNTOUCHED_PENALTY = 0.5
 
 
 @dataclass
@@ -59,16 +61,24 @@ class SelfPlayPong:
         self.small_font = pygame.font.SysFont("monospace", 20, bold=False)
 
         self.left_paddle = Paddle(
-            pygame.Rect(40, WINDOW_HEIGHT // 2 - 100, PADDLE_WIDTH, 200), LEFT_COLOR
+            pygame.Rect(40, WINDOW_HEIGHT // 2 - PADDLE_HEIGHT // 2, PADDLE_WIDTH, PADDLE_HEIGHT),
+            LEFT_COLOR,
         )
         self.right_paddle = Paddle(
-            pygame.Rect(WINDOW_WIDTH - 40 - PADDLE_WIDTH, WINDOW_HEIGHT // 2 - 100, PADDLE_WIDTH, 200),
+            pygame.Rect(
+                WINDOW_WIDTH - 40 - PADDLE_WIDTH,
+                WINDOW_HEIGHT // 2 - PADDLE_HEIGHT // 2,
+                PADDLE_WIDTH,
+                PADDLE_HEIGHT,
+            ),
             RIGHT_COLOR,
         )
         self.ball = Ball()
 
         self.left_score = 0
         self.right_score = 0
+        self.left_penalties = 0
+        self.right_penalties = 0
         self.device = device
         self.gamma = gamma
         self.left_policy = PongPolicyNetwork().to(self.device)
@@ -144,6 +154,9 @@ class SelfPlayPong:
                 left_reward -= SCORE_PENALTY
                 if self.last_hit == "right":
                     right_reward += SCORE_REWARD
+            else:
+                self.left_penalties += 1
+                left_reward -= UNTOUCHED_PENALTY
             point_over = True
         elif self.ball.rect.left > WINDOW_WIDTH:
             if ball_active:
@@ -151,6 +164,9 @@ class SelfPlayPong:
                 right_reward -= SCORE_PENALTY
                 if self.last_hit == "left":
                     left_reward += SCORE_REWARD
+            else:
+                self.right_penalties += 1
+                right_reward -= UNTOUCHED_PENALTY
             point_over = True
         if point_over:
             self.last_hit = None
@@ -219,7 +235,10 @@ class SelfPlayPong:
         self.ball.draw(self.screen)
 
         score_text = self.font.render(
-            f"LEFT: {self.left_score}    RIGHT: {self.right_score}", True, SCORE_COLOR
+            f"LEFT: {self.left_score} (P{self.left_penalties})    "
+            f"RIGHT: {self.right_score} (P{self.right_penalties})",
+            True,
+            SCORE_COLOR,
         )
         text_rect = score_text.get_rect(center=(WINDOW_WIDTH // 2, 30))
         self.screen.blit(score_text, text_rect)
@@ -268,6 +287,8 @@ class SelfPlayPong:
         self.rounds_completed = int(meta.get("rounds_completed", 0))
         self.last_left_return = float(meta.get("last_left_return", 0.0))
         self.last_right_return = float(meta.get("last_right_return", 0.0))
+        self.left_penalties = int(meta.get("left_penalties", 0))
+        self.right_penalties = int(meta.get("right_penalties", 0))
         print(f"[Pong SelfPlay] Loaded checkpoint from {self.checkpoint_path}")
 
     def _save_checkpoint(self) -> None:
@@ -286,6 +307,8 @@ class SelfPlayPong:
                 "rounds_completed": self.rounds_completed,
                 "last_left_return": self.last_left_return,
                 "last_right_return": self.last_right_return,
+                "left_penalties": self.left_penalties,
+                "right_penalties": self.right_penalties,
             },
         }
         torch.save(payload, self.checkpoint_path)

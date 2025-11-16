@@ -24,6 +24,7 @@ RIGHT_PADDLE_X = WINDOW_WIDTH - 40 - PADDLE_WIDTH
 HIT_REWARD = 0.4
 SCORE_REWARD = 1.0
 SCORE_PENALTY = 1.0
+UNTOUCHED_PENALTY = 0.5
 
 
 def clamp(value: float, low: float, high: float) -> float:
@@ -115,14 +116,19 @@ class PongTrainingEnv:
 
         done = False
         if self.ball_x < -BALL_RADIUS:
-            self.right_score += 1
-            reward -= SCORE_PENALTY
+            if self.last_hit == "right":
+                self.right_score += 1
+                reward -= SCORE_PENALTY
+            elif self.last_hit is None:
+                reward -= UNTOUCHED_PENALTY
             done = True
             self._reset_round()
         elif self.ball_x > WINDOW_WIDTH + BALL_RADIUS:
-            self.left_score += 1
             if self.last_hit == "left":
+                self.left_score += 1
                 reward += SCORE_REWARD
+            elif self.last_hit is None:
+                reward -= UNTOUCHED_PENALTY
             done = True
             self._reset_round()
 

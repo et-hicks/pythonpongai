@@ -22,7 +22,7 @@ from seeking.rl.pong_policy import PongPolicyNetwork
 LEFT_PADDLE_X = 40
 RIGHT_PADDLE_X = WINDOW_WIDTH - 40 - PADDLE_WIDTH
 HIT_REWARD = 0.4
-SCORE_REWARD = 1.0
+SCORE_REWARD = 3.0
 SCORE_PENALTY = 1.0
 UNTOUCHED_PENALTY = 0.5
 
@@ -135,11 +135,13 @@ class PongTrainingEnv:
         return StepResult(self._state(), reward, done)
 
     def _state(self) -> List[float]:
-        top_norm = self.left_y / WINDOW_HEIGHT
-        bottom_norm = (self.left_y + PADDLE_HEIGHT) / WINDOW_HEIGHT
+        left_top = self.left_y / WINDOW_HEIGHT
+        left_bottom = (self.left_y + PADDLE_HEIGHT) / WINDOW_HEIGHT
+        right_top = self.right_y / WINDOW_HEIGHT
+        right_bottom = (self.right_y + PADDLE_HEIGHT) / WINDOW_HEIGHT
         score_norm = (self.left_score - self.right_score) / 10.0
         ball_norm = self.ball_y / WINDOW_HEIGHT
-        return [top_norm, bottom_norm, score_norm, ball_norm]
+        return [left_top, left_bottom, right_top, right_bottom, score_norm, ball_norm]
 
     def _left_center(self) -> float:
         return self.left_y + PADDLE_HEIGHT / 2

@@ -5,12 +5,12 @@ from torch import nn
 
 
 class PongPolicyNetwork(nn.Module):
-    """Four-layer feed-forward policy mapping a 4-dim state to 2 action logits."""
+    """Four-layer feed-forward policy mapping a 6-dim state to 2 action logits."""
 
     def __init__(self) -> None:
         super().__init__()
         self.net = nn.Sequential(
-            nn.Linear(4, 64),
+            nn.Linear(6, 64),
             nn.ReLU(),
             nn.Linear(64, 32),
             nn.ReLU(),

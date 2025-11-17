@@ -26,8 +26,8 @@ from seeking.game.pong import (
 from seeking.rl.pong_policy import PongPolicyNetwork
 
 
-HIT_REWARD = 0.4
-SCORE_REWARD = 1.0
+HIT_REWARD = 2.0
+SCORE_REWARD = 3.0
 SCORE_PENALTY = 1.0
 UNTOUCHED_PENALTY = 0.5
 
@@ -120,8 +120,16 @@ class SelfPlayPong:
                     self.paused = not self.paused
 
     def _step_training(self) -> None:
-        left_state = self._build_state(self.left_paddle.rect, self.left_score - self.right_score)
-        right_state = self._build_state(self.right_paddle.rect, self.right_score - self.left_score)
+        left_state = self._build_state(
+            self.left_paddle.rect,
+            self.right_paddle.rect,
+            self.left_score - self.right_score,
+        )
+        right_state = self._build_state(
+            self.right_paddle.rect,
+            self.left_paddle.rect,
+            self.right_score - self.left_score,
+        )
 
         left_action, left_log_prob = self._sample_action(self.left_policy, left_state)
         right_action, right_log_prob = self._sample_action(self.right_policy, right_state)
@@ -213,16 +221,22 @@ class SelfPlayPong:
         action = dist.sample()
         return action.item(), dist.log_prob(action)
 
-    def _build_state(self, paddle_rect: pygame.Rect, score_delta: int) -> torch.Tensor:
+    def _build_state(
+        self,
+        paddle_rect: pygame.Rect,
+        opponent_rect: pygame.Rect,
+        score_delta: int,
+    ) -> torch.Tensor:
         state = torch.tensor(
             [
                 paddle_rect.top / WINDOW_HEIGHT,
                 paddle_rect.bottom / WINDOW_HEIGHT,
+                opponent_rect.top / WINDOW_HEIGHT,
+                opponent_rect.bottom / WINDOW_HEIGHT,
                 score_delta / 10.0,
                 self.ball.rect.centery / WINDOW_HEIGHT,
             ],
             dtype=torch.float32,
-            device=self.device,
         )
         return state
 
@@ -266,10 +280,18 @@ class SelfPlayPong:
         if not self.checkpoint_path:
             return
         if not self.checkpoint_path.exists():
+            print(
+                "[Pong SelfPlay] No checkpoint found. Starting new session "
+                f"(expected at {self.checkpoint_path})"
+            )
             return
         try:
             payload = torch.load(self.checkpoint_path, map_location=self.device)
         except OSError:
+            print(
+                f"[Pong SelfPlay] Failed to load checkpoint at {self.checkpoint_path}. "
+                "Starting new session."
+            )
             return
         left_state = payload.get("left_policy")
         right_state = payload.get("right_policy")

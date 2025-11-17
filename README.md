@@ -92,7 +92,7 @@ python -m seeking.main --mode pong
 
 #### Training the Pong agent
 
-Flip on the `--pong-train` flag to launch a lightweight REINFORCE trainer that builds a four-layer feed-forward network with two hidden layers (64 and 32 units with ReLU). The model ingests a normalized `(4,)` state vector containing the paddle's top and bottom positions, the current score differential, and the ball's vertical position, and emits unnormalized logits for the two discrete actions (`move_up`, `move_down`). The trainer can run on CPU or GPU (set via `--device`) and saves a standard `state_dict` when `--pong-checkpoint` is provided.
+Flip on the `--pong-train` flag to launch a lightweight REINFORCE trainer that builds a four-layer feed-forward network with two hidden layers (64 and 32 units with ReLU). The model ingests a normalized `(6,)` state vector containing your paddle's top/bottom, the opponent paddle's top/bottom, the current score differential, and the ball's vertical position, and emits unnormalized logits for the two discrete actions (`move_up`, `move_down`). The trainer can run on CPU or GPU (set via `--device`) and saves a standard `state_dict` when `--pong-checkpoint` is provided.
 
 ```bash
 python -m seeking.main --mode pong --pong-train --episodes 500 --lr 5e-4 --pong-checkpoint pong_policy.pt
@@ -102,7 +102,7 @@ The saved checkpoint can later be loaded with `torch.load` or plugged into `Pong
 
 #### Self-play training inside the UI
 
-To watch two reinforcement learning agents learn directly in the rendered Pong match, start the new self-play mode. Both paddles run identical four-layer feed-forward policies (4 inputs → 64 → 32 → 2) and receive symmetric on-screen rewards (track ball alignment, bounces, and scoring). Parameters such as `--lr`, `--gamma`, `--device`, and `--episodes` still apply, though the self-play loop trains continuously until you quit.
+To watch two reinforcement learning agents learn directly in the rendered Pong match, start the new self-play mode. Both paddles run identical four-layer feed-forward policies (6 inputs → 64 → 32 → 2) and receive symmetric on-screen rewards (track ball alignment, bounces, and scoring). Parameters such as `--lr`, `--gamma`, `--device`, and `--episodes` still apply, though the self-play loop trains continuously until you quit.
 
 ```bash
 python -m seeking.main --mode pong --pong-selfplay --lr 1e-3 --gamma 0.99

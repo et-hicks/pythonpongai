@@ -54,10 +54,27 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Optional path to save the trained Pong policy (state_dict).",
     )
     parser.add_argument(
+        "--pong-demo",
+        type=str,
+        default=None,
+        help="Path to a trained Pong policy checkpoint to visualize in the UI.",
+    )
+    parser.add_argument(
+        "--pong-demo-sample",
+        action="store_true",
+        help="Sample actions (instead of greedy) when running the Pong demo.",
+    )
+    parser.add_argument(
         "--pong-max-steps",
         type=int,
         default=600,
         help="Maximum steps per Pong training episode.",
+    )
+    parser.add_argument(
+        "--pong-entropy-coef",
+        type=float,
+        default=0.02,
+        help="Entropy regularization coefficient for Pong policy training.",
     )
     parser.add_argument("--headless", action="store_true", help="Disable Arcade window.")
     parser.add_argument("--seed", type=int, default=None)
@@ -84,8 +101,11 @@ def main(argv: list[str] | None = None) -> None:
         trainer = Trainer(env, policy, lr=args.lr, gamma=args.gamma, device=args.device)
         trainer.train(episodes=args.episodes)
     elif args.mode == "pong":
-        if args.pong_selfplay and args.pong_train:
-            print("Choose either --pong-train or --pong-selfplay, not both.", file=sys.stderr)
+        if args.pong_selfplay and (args.pong_train or args.pong_demo):
+            print(
+                "Choose either --pong-selfplay, --pong-train, or --pong-demo (only one at a time).",
+                file=sys.stderr,
+            )
             raise SystemExit(2)
         if args.pong_selfplay:
             from seeking.game.pong_selfplay import run_pong_selfplay
@@ -106,9 +126,28 @@ def main(argv: list[str] | None = None) -> None:
                 lr=args.lr,
                 gamma=args.gamma,
                 max_steps=args.pong_max_steps,
+                entropy_coef=args.pong_entropy_coef,
                 seed=args.seed,
             )
             trainer.train(episodes=args.episodes, checkpoint_path=args.pong_checkpoint)
+            if args.pong_demo:
+                demo_path = args.pong_demo
+                from seeking.game.pong_policy_demo import run_pong_policy_demo
+
+                run_pong_policy_demo(
+                    checkpoint_path=demo_path,
+                    device=device,
+                    sample_actions=args.pong_demo_sample,
+                )
+        elif args.pong_demo:
+            from seeking.game.pong_policy_demo import run_pong_policy_demo
+
+            device = torch.device(args.device)
+            run_pong_policy_demo(
+                checkpoint_path=args.pong_demo,
+                device=device,
+                sample_actions=args.pong_demo_sample,
+            )
         else:
             from seeking.game.pong import run_pong
 

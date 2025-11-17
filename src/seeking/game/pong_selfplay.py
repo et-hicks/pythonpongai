@@ -26,10 +26,18 @@ from seeking.game.pong import (
 from seeking.rl.pong_policy import PongPolicyNetwork
 
 
-HIT_REWARD = 2.0
-SCORE_REWARD = 3.0
-SCORE_PENALTY = 1.0
-UNTOUCHED_PENALTY = 0.5
+HIT_REWARD = 0.1
+SCORE_REWARD = 1.0
+CONCEDE_PENALTY = -1.0
+DISTANCE_PENALTY_SCALE = 5e-4
+CORNER_THRESHOLD = 0.05
+CORNER_PENALTY = 0.01
+IDLE_DELTA = 2.0
+IDLE_THRESHOLD = 45
+IDLE_PENALTY = 0.005
+BORING_STEP_LIMIT = 500
+TERMINAL_BASE_PENALTY = 0.5
+TERMINAL_DISTANCE_SCALE = 0.001
 
 
 @dataclass
@@ -88,6 +96,11 @@ class SelfPlayPong:
         self.checkpoint_path = Path(checkpoint_path) if checkpoint_path else None
         self.left_buffer = AgentBuffer()
         self.right_buffer = AgentBuffer()
+        self.steps_since_hit = 0
+        self.left_idle_steps = 0
+        self.right_idle_steps = 0
+        self.left_prev_y = self.left_paddle.rect.y
+        self.right_prev_y = self.right_paddle.rect.y
 
         self.running = True
         self.paused = False
@@ -136,10 +149,41 @@ class SelfPlayPong:
 
         self.left_paddle.move(-1 if left_action == 0 else 1)
         self.right_paddle.move(-1 if right_action == 0 else 1)
+        if abs(self.left_paddle.rect.y - self.left_prev_y) < IDLE_DELTA:
+            self.left_idle_steps += 1
+        else:
+            self.left_idle_steps = 0
+        if abs(self.right_paddle.rect.y - self.right_prev_y) < IDLE_DELTA:
+            self.right_idle_steps += 1
+        else:
+            self.right_idle_steps = 0
+        self.left_prev_y = self.left_paddle.rect.y
+        self.right_prev_y = self.right_paddle.rect.y
 
         self.ball.move()
-        left_reward = -abs(self.left_paddle.rect.centery - self.ball.rect.centery) / WINDOW_HEIGHT
-        right_reward = -abs(self.right_paddle.rect.centery - self.ball.rect.centery) / WINDOW_HEIGHT
+        left_reward = 0.0
+        right_reward = 0.0
+        self.steps_since_hit += 1
+
+        left_center = self.left_paddle.rect.centery
+        right_center = self.right_paddle.rect.centery
+        ball_center = self.ball.rect.centery
+
+        left_reward -= DISTANCE_PENALTY_SCALE * abs(left_center - ball_center)
+        right_reward -= DISTANCE_PENALTY_SCALE * abs(right_center - ball_center)
+
+        left_norm = left_center / WINDOW_HEIGHT
+        right_norm = right_center / WINDOW_HEIGHT
+
+        if left_norm < CORNER_THRESHOLD or left_norm > 1 - CORNER_THRESHOLD:
+            left_reward -= CORNER_PENALTY
+        if right_norm < CORNER_THRESHOLD or right_norm > 1 - CORNER_THRESHOLD:
+            right_reward -= CORNER_PENALTY
+
+        if self.left_idle_steps > IDLE_THRESHOLD:
+            left_reward -= IDLE_PENALTY
+        if self.right_idle_steps > IDLE_THRESHOLD:
+            right_reward -= IDLE_PENALTY
 
         if self.ball.rect.colliderect(self.left_paddle.rect):
             self.ball.rect.left = self.left_paddle.rect.right
@@ -147,37 +191,45 @@ class SelfPlayPong:
             self.ball.color = self.left_paddle.color
             left_reward += HIT_REWARD
             self.last_hit = "left"
+            self.steps_since_hit = 0
         elif self.ball.rect.colliderect(self.right_paddle.rect):
             self.ball.rect.right = self.right_paddle.rect.left
             self.ball.velocity[0] = -abs(self.ball.velocity[0])
             self.ball.color = self.right_paddle.color
             right_reward += HIT_REWARD
             self.last_hit = "right"
+            self.steps_since_hit = 0
 
         ball_active = self.ball.color != BALL_DEFAULT_COLOR
         point_over = False
         if self.ball.rect.right < 0:
+            left_reward += CONCEDE_PENALTY
             if ball_active:
                 self.right_score += 1
-                left_reward -= SCORE_PENALTY
-                if self.last_hit == "right":
-                    right_reward += SCORE_REWARD
+                right_reward += SCORE_REWARD
             else:
                 self.left_penalties += 1
-                left_reward -= UNTOUCHED_PENALTY
             point_over = True
         elif self.ball.rect.left > WINDOW_WIDTH:
+            right_reward += CONCEDE_PENALTY
             if ball_active:
                 self.left_score += 1
-                right_reward -= SCORE_PENALTY
-                if self.last_hit == "left":
-                    left_reward += SCORE_REWARD
+                left_reward += SCORE_REWARD
             else:
                 self.right_penalties += 1
-                right_reward -= UNTOUCHED_PENALTY
             point_over = True
+        elif self.steps_since_hit > BORING_STEP_LIMIT:
+            point_over = True
+            left_penalty = TERMINAL_BASE_PENALTY + TERMINAL_DISTANCE_SCALE * abs(left_center - ball_center)
+            right_penalty = TERMINAL_BASE_PENALTY + TERMINAL_DISTANCE_SCALE * abs(right_center - ball_center)
+            left_reward -= left_penalty
+            right_reward -= right_penalty
+            self.left_penalties += 1
+            self.right_penalties += 1
+
         if point_over:
             self.last_hit = None
+            self.steps_since_hit = 0
 
         self.left_buffer.log_probs.append(left_log_prob)
         self.left_buffer.rewards.append(left_reward)
@@ -196,6 +248,11 @@ class SelfPlayPong:
         self.right_buffer.clear()
         self.ball.reset()
         self.last_hit = None
+        self.steps_since_hit = 0
+        self.left_idle_steps = 0
+        self.right_idle_steps = 0
+        self.left_prev_y = self.left_paddle.rect.y
+        self.right_prev_y = self.right_paddle.rect.y
         self.rounds_completed += 1
 
     def _update_agent(self, buffer: AgentBuffer, optimizer: optim.Optimizer) -> float:
@@ -249,8 +306,8 @@ class SelfPlayPong:
         self.ball.draw(self.screen)
 
         score_text = self.font.render(
-            f"LEFT: {self.left_score} (P{self.left_penalties})    "
-            f"RIGHT: {self.right_score} (P{self.right_penalties})",
+            f"LEFT: {self.left_score} (B{self.left_penalties})    "
+            f"RIGHT: {self.right_score} (B{self.right_penalties})",
             True,
             SCORE_COLOR,
         )

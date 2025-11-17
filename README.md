@@ -94,11 +94,29 @@ python -m seeking.main --mode pong
 
 Flip on the `--pong-train` flag to launch a lightweight REINFORCE trainer that builds a four-layer feed-forward network with two hidden layers (64 and 32 units with ReLU). The model ingests a normalized `(6,)` state vector containing your paddle's top/bottom, the opponent paddle's top/bottom, the current score differential, and the ball's vertical position, and emits unnormalized logits for the two discrete actions (`move_up`, `move_down`). The trainer can run on CPU or GPU (set via `--device`) and saves a standard `state_dict` when `--pong-checkpoint` is provided.
 
+Quick start:
+
+```bash
+python -m seeking.main --mode pong --pong-train
+```
+
 ```bash
 python -m seeking.main --mode pong --pong-train --episodes 500 --lr 5e-4 --pong-checkpoint pong_policy.pt
 ```
 
 The saved checkpoint can later be loaded with `torch.load` or plugged into `PongPolicyNetwork.load_state_dict` for experimentation.
+
+To watch the trained policy inside the UI, load the checkpoint with the new demo flag:
+
+```bash
+python -m seeking.main --mode pong --pong-demo pong_policy.pt
+```
+
+You can also chain training and playback in one go:
+
+```bash
+python -m seeking.main --mode pong --pong-train --episodes 500 --pong-checkpoint pong_policy.pt --pong-demo pong_policy.pt
+```
 
 #### Self-play training inside the UI
 

@@ -164,8 +164,8 @@ class PongGame:
         pygame.draw.rect(self.screen, self.right_paddle.color, self.right_paddle.rect)
         self.ball.draw(self.screen)
         score_text = self.font.render(
-            f"LEFT: {self.left_score} (P{self.left_penalties})    "
-            f"RIGHT: {self.right_score} (P{self.right_penalties})",
+            f"LEFT: {self.left_score} (B{self.left_penalties})    "
+            f"RIGHT: {self.right_score} (B{self.right_penalties})",
             True,
             SCORE_COLOR,
         )

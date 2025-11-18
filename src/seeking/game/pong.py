@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass
+import math
 from pathlib import Path
 from typing import Optional
 
@@ -25,6 +26,7 @@ RIGHT_COLOR = (180, 0, 255)
 BACKGROUND_COLOR = (15, 15, 20)
 NET_COLOR = (70, 70, 90)
 SCORE_COLOR = (255, 255, 255)
+HIGHLIGHT_COLOR = (255, 220, 0)
 BALL_DEFAULT_COLOR = (255, 255, 255)
 
 
@@ -55,6 +57,8 @@ class Ball:
         self.color = BALL_DEFAULT_COLOR
         self._x_float = float(self.rect.x)
         self._y_float = float(self.rect.y)
+        self.angle = random.uniform(0, math.tau)
+        self.angular_velocity = random.uniform(-3.0, 3.0)
         self.reset()
 
     def reset(self) -> None:
@@ -70,8 +74,10 @@ class Ball:
         self.velocity[0] = horizontal * BALL_SPEED / magnitude
         self.velocity[1] = vertical * BALL_SPEED / magnitude
         self.color = BALL_DEFAULT_COLOR
+        self.angle = random.uniform(0, math.tau)
+        self.angular_velocity = random.uniform(-3.0, 3.0)
 
-    def move(self, scale: float = 1.0) -> None:
+    def move(self, scale: float = 1.0, shape: str = "ball") -> None:
         self._x_float += self.velocity[0] * scale
         self._y_float += self.velocity[1] * scale
         self.rect.x = int(self._x_float)
@@ -79,17 +85,79 @@ class Ball:
         if self.rect.top <= 0 or self.rect.bottom >= WINDOW_HEIGHT:
             self.velocity[1] *= -1
             self._y_float = float(self.rect.y)
+            if shape != "ball":
+                self._apply_wall_spin(shape)
+        if shape in {"triangle", "square"}:
+            self.angle = (self.angle + math.radians(self.angular_velocity) * scale) % (2 * math.pi)
 
     def draw(self, surface: pygame.Surface, shape: str = "ball") -> None:
         if shape == "square":
-            pygame.draw.rect(surface, self.color, self.rect)
+            vertices = self.square_vertices()
+            if vertices:
+                pygame.draw.polygon(surface, self.color, vertices)
+            else:
+                pygame.draw.rect(surface, self.color, self.rect)
         elif shape == "triangle":
-            top = (self.rect.centerx, self.rect.top)
-            left = (self.rect.left, self.rect.bottom)
-            right = (self.rect.right, self.rect.bottom)
-            pygame.draw.polygon(surface, self.color, [top, left, right])
+            vertices = self.triangle_vertices()
+            if vertices:
+                pygame.draw.polygon(surface, self.color, vertices)
+            else:
+                pygame.draw.polygon(
+                    surface,
+                    self.color,
+                    [
+                        (self.rect.centerx, self.rect.top),
+                        (self.rect.left, self.rect.bottom),
+                        (self.rect.right, self.rect.bottom),
+                    ],
+                )
         else:
             pygame.draw.circle(surface, self.color, self.rect.center, BALL_RADIUS)
+
+    def triangle_vertices(self) -> list[tuple[float, float]]:
+        if not hasattr(self, "angle"):
+            return []
+        center = (self._x_float + BALL_RADIUS, self._y_float + BALL_RADIUS)
+        vertices = []
+        for offset in (0, 2 * math.pi / 3, 4 * math.pi / 3):
+            ang = self.angle + offset
+            x = center[0] + BALL_RADIUS * math.cos(ang)
+            y = center[1] + BALL_RADIUS * math.sin(ang)
+            vertices.append((x, y))
+        return vertices
+
+    def square_vertices(self) -> list[tuple[float, float]]:
+        if not hasattr(self, "angle"):
+            return []
+        center = (self._x_float + BALL_RADIUS, self._y_float + BALL_RADIUS)
+        half = BALL_RADIUS
+        vertices = []
+        for offset in (math.pi / 4, 3 * math.pi / 4, 5 * math.pi / 4, 7 * math.pi / 4):
+            ang = self.angle + offset
+            x = center[0] + half * math.sqrt(2) * math.cos(ang)
+            y = center[1] + half * math.sqrt(2) * math.sin(ang)
+            vertices.append((x, y))
+        return vertices
+
+    def add_spin(self, strength: float = 5.0) -> None:
+        self.angular_velocity += random.uniform(-strength, strength)
+        self.angular_velocity = max(-12.0, min(12.0, self.angular_velocity))
+
+    def _apply_wall_spin(self, shape: str) -> None:
+        if shape == "square":
+            self.velocity[0] += random.uniform(-0.5, 0.5)
+            self.add_spin(3.0)
+        elif shape == "triangle":
+            self.add_spin(4.0)
+        self._normalize_speed()
+
+    def _normalize_speed(self) -> None:
+        speed = (self.velocity[0] ** 2 + self.velocity[1] ** 2) ** 0.5
+        if speed == 0:
+            speed = 1.0
+        scale = BALL_SPEED / speed
+        self.velocity[0] *= scale
+        self.velocity[1] *= scale
 
 
 MODE_LABELS = {
@@ -171,6 +239,9 @@ class PongGame:
             if event.type == pygame.QUIT:
                 self.running = False
             elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_q:
+                    self.running = False
+                    continue
                 if self.menu_active:
                     if event.key == pygame.K_1:
                         self._set_mode("two_player")
@@ -194,9 +265,7 @@ class PongGame:
                     self.paused = True
                     self.pause_menu_active = True
                     continue
-                if event.key == pygame.K_q:
-                    self.running = False
-                elif event.key == pygame.K_SPACE:
+                if event.key == pygame.K_SPACE:
                     self.paused = not self.paused
 
     def _handle_input(self, scale: float) -> None:
@@ -233,17 +302,31 @@ class PongGame:
         self.right_paddle.move(right_direction, scale)
 
     def _update_world(self, scale: float) -> None:
-        self.ball.move(scale)
+        self.ball.move(scale, self.ball_shape)
         if self.ball.rect.colliderect(self.left_paddle.rect):
             self.ball.rect.left = self.left_paddle.rect.right
-            self.ball.velocity[0] = abs(self.ball.velocity[0])
+            self.ball._x_float = float(self.ball.rect.x)
             self.ball.color = self.left_paddle.color
             self.rally_hits += 1
+            if self.ball_shape == "triangle":
+                normal = self._triangle_edge_normal((1.0, 0.0))
+                self._reflect_velocity(normal, chaotic=True)
+                self.ball.add_spin(6.0)
+            else:
+                self.ball.velocity[0] = abs(self.ball.velocity[0])
+                self._apply_shape_bounce()
         elif self.ball.rect.colliderect(self.right_paddle.rect):
             self.ball.rect.right = self.right_paddle.rect.left
-            self.ball.velocity[0] = -abs(self.ball.velocity[0])
+            self.ball._x_float = float(self.ball.rect.x)
             self.ball.color = self.right_paddle.color
             self.rally_hits += 1
+            if self.ball_shape == "triangle":
+                normal = self._triangle_edge_normal((-1.0, 0.0))
+                self._reflect_velocity(normal, chaotic=True)
+                self.ball.add_spin(6.0)
+            else:
+                self.ball.velocity[0] = -abs(self.ball.velocity[0])
+                self._apply_shape_bounce()
 
         scored_ball = self.ball.color != BALL_DEFAULT_COLOR
         if self.ball.rect.right < 0:
@@ -253,6 +336,7 @@ class PongGame:
                 self.left_penalties += 1
             self.ball.reset()
             self.rally_hits = 0
+            self.ball._normalize_speed()
         elif self.ball.rect.left > WINDOW_WIDTH:
             if scored_ball:
                 self.left_score += 1
@@ -260,6 +344,7 @@ class PongGame:
                 self.right_penalties += 1
             self.ball.reset()
             self.rally_hits = 0
+            self.ball._normalize_speed()
 
     def _render(self) -> None:
         self.screen.fill(BACKGROUND_COLOR)
@@ -316,10 +401,17 @@ class PongGame:
         self.screen.blit(option1, option1.get_rect(center=(WINDOW_WIDTH // 2, WINDOW_HEIGHT // 3 + 60)))
         self.screen.blit(option2, option2.get_rect(center=(WINDOW_WIDTH // 2, WINDOW_HEIGHT // 3 + 120)))
         self.screen.blit(option3, option3.get_rect(center=(WINDOW_WIDTH // 2, WINDOW_HEIGHT // 3 + 180)))
-        shape_text = self.font.render(
-            f"Projectile Shape: {self.ball_shape.upper()}  (←/→ to change)", True, SCORE_COLOR
-        )
-        self.screen.blit(shape_text, shape_text.get_rect(center=(WINDOW_WIDTH // 2, WINDOW_HEIGHT // 3 + 240)))
+        shape_symbols = {"ball": "BALL", "square": "SQUARE", "triangle": "TRI"}
+        base_y = WINDOW_HEIGHT // 3 + 240
+        offsets = [-120, 0, 120]
+        for idx, shape in enumerate(self.shape_options):
+            symbol = shape_symbols.get(shape, shape.upper())
+            display = f"({symbol})" if idx == self.shape_index else symbol
+            color = HIGHLIGHT_COLOR if idx == self.shape_index else SCORE_COLOR
+            shape_text = self.font.render(display, True, color)
+            self.screen.blit(shape_text, shape_text.get_rect(center=(WINDOW_WIDTH // 2 + offsets[idx], base_y)))
+        hint_shape = self.font.render("< / > to change projectile shape", True, SCORE_COLOR)
+        self.screen.blit(hint_shape, hint_shape.get_rect(center=(WINDOW_WIDTH // 2, base_y + 50)))
         hint = self.font.render("Press Q to quit", True, SCORE_COLOR)
         self.screen.blit(hint, hint.get_rect(center=(WINDOW_WIDTH // 2, WINDOW_HEIGHT - 80)))
         pygame.display.flip()
@@ -411,6 +503,58 @@ class PongGame:
         if self.ball.rect.centery > paddle_rect.centery + 10:
             return 1
         return 0
+
+    def _apply_shape_bounce(self) -> None:
+        if self.ball_shape == "ball":
+            return
+        if self.ball_shape == "square":
+            self.ball.velocity[1] += random.uniform(-2.0, 2.0)
+            self.ball.add_spin(4.0)
+            self.ball._normalize_speed()
+        elif self.ball_shape == "triangle":
+            # handled by reflection logic
+            pass
+
+    def _triangle_edge_normal(self, target_normal: tuple[float, float]) -> tuple[float, float]:
+        verts = self.ball.triangle_vertices()
+        if not verts:
+            return target_normal
+        normals = []
+        center = self.ball.rect.center
+        for idx in range(3):
+            p1 = verts[idx]
+            p2 = verts[(idx + 1) % 3]
+            edge = (p2[0] - p1[0], p2[1] - p1[1])
+            normal = self._normalize_vector((edge[1], -edge[0]))
+            mid = ((p1[0] + p2[0]) / 2, (p1[1] + p2[1]) / 2)
+            to_center = (center[0] - mid[0], center[1] - mid[1])
+            if normal[0] * to_center[0] + normal[1] * to_center[1] > 0:
+                normal = (-normal[0], -normal[1])
+            normals.append(normal)
+        target_normal = self._normalize_vector(target_normal)
+        normals.sort(key=lambda n: n[0] * target_normal[0] + n[1] * target_normal[1], reverse=True)
+        return normals[0]
+
+    def _reflect_velocity(self, normal: tuple[float, float], chaotic: bool = False) -> None:
+        normal = self._normalize_vector(normal)
+        vx, vy = self.ball.velocity
+        dot = vx * normal[0] + vy * normal[1]
+        vx = vx - 2 * dot * normal[0]
+        vy = vy - 2 * dot * normal[1]
+        if chaotic:
+            angle = random.uniform(-0.12, 0.12)
+            cos_a = math.cos(angle)
+            sin_a = math.sin(angle)
+            vx, vy = vx * cos_a - vy * sin_a, vx * sin_a + vy * cos_a
+        self.ball.velocity[0] = vx
+        self.ball.velocity[1] = vy
+        self.ball._normalize_speed()
+
+    def _normalize_vector(self, vec: tuple[float, float]) -> tuple[float, float]:
+        length = (vec[0] ** 2 + vec[1] ** 2) ** 0.5
+        if length == 0:
+            return (0.0, 0.0)
+        return (vec[0] / length, vec[1] / length)
 
     def _finalize_ai_battle(self) -> None:
         if not self.ai_vs_ai_used:

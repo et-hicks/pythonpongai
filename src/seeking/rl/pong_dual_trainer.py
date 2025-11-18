@@ -46,7 +46,7 @@ class DualStepResult:
 
 
 class DualPongEnv:
-    def __init__(self, seed: int | None = None) -> None:
+    def __init__(self, seed: int | None = None, projectile_shape: str = "ball") -> None:
         self.random = random.Random(seed)
         self.left_y = 0.0
         self.right_y = 0.0
@@ -62,6 +62,7 @@ class DualPongEnv:
         self.right_idle_steps = 0
         self.prev_left_y = 0.0
         self.prev_right_y = 0.0
+        self.shape = projectile_shape
         self.reset()
 
     def reset(self) -> Tuple[List[float], List[float]]:
@@ -99,6 +100,7 @@ class DualPongEnv:
             else:
                 right_reward += HIT_REWARD
             self.steps_since_hit = 0
+            self._apply_shape_spin(collision)
         else:
             self.steps_since_hit += 1
 
@@ -187,6 +189,16 @@ class DualPongEnv:
             return "right"
         return None
 
+    def _apply_shape_spin(self, collision_side: str) -> None:
+        if self.shape == "ball":
+            return
+        if self.shape == "square":
+            jitter = self.random.uniform(-2.5, 2.5)
+            self.ball_vy += jitter if collision_side == "left" else -jitter
+        elif self.shape == "triangle":
+            self.ball_vx += self.random.uniform(-3.5, 3.5)
+            self.ball_vy += self.random.uniform(-4.5, 4.5)
+
     def _compute_dense_rewards(self) -> Tuple[float, float]:
         left_center = self.left_center
         right_center = self.right_center
@@ -246,13 +258,16 @@ class PongDualTrainer:
         gamma: float = 0.99,
         entropy_coef: float = 0.02,
         seed: int | None = None,
+        projectile_shape: str = "ball",
     ) -> None:
         self.device = device
         self.gamma = gamma
         self.entropy_coef = entropy_coef
         self.green_checkpoint = Path(green_checkpoint)
         self.purple_checkpoint = Path(purple_checkpoint)
-        self.env = DualPongEnv(seed=seed)
+        self.projectile_shape = projectile_shape
+        self.env = DualPongEnv(seed=seed, projectile_shape=projectile_shape)
+        self.device_label = describe_device(self.device)
 
         self.green_policy = PongPolicyNetwork().to(self.device)
         self.purple_policy = PongPolicyNetwork().to(self.device)
@@ -267,6 +282,10 @@ class PongDualTrainer:
             policy.load_state_dict(torch.load(path, map_location=self.device))
 
     def train(self, episodes: int) -> None:
+        print(
+            f"[Pong Dual Trainer] Training on {self.device_label} "
+            f"(projectile={self.projectile_shape})"
+        )
         for episode in range(1, episodes + 1):
             left_state, right_state = self.env.reset()
             left_log_probs: List[torch.Tensor] = []
@@ -354,3 +373,13 @@ class PongDualTrainer:
         self.green_policy.load_state_dict(state)
         self.purple_policy.load_state_dict(state)
         self.save()
+def describe_device(device: torch.device) -> str:
+    if device.type == "cuda" and torch.cuda.is_available():
+        try:
+            name = torch.cuda.get_device_name(device.index or torch.cuda.current_device())
+        except Exception:
+            name = "CUDA"
+        return f"CUDA ({name})"
+    if device.type == "mps":
+        return "Apple GPU (MPS)"
+    return "CPU"

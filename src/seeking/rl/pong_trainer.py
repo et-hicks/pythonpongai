@@ -49,7 +49,7 @@ class StepResult:
 class PongTrainingEnv:
     """Minimal headless Pong simulation for RL training."""
 
-    def __init__(self, seed: int | None = None) -> None:
+    def __init__(self, seed: int | None = None, projectile_shape: str = "ball") -> None:
         self.random = random.Random(seed)
         self.left_score = 0
         self.right_score = 0
@@ -63,6 +63,7 @@ class PongTrainingEnv:
         self.steps_since_hit = 0
         self.left_idle_steps = 0
         self.prev_left_y = 0.0
+        self.projectile_shape = projectile_shape
         self.reset()
 
     def reset(self) -> List[float]:
@@ -133,6 +134,7 @@ class PongTrainingEnv:
             reward += HIT_REWARD
             self.last_hit = "left"
             self.steps_since_hit = 0
+            self._apply_shape_spin(True)
 
         if (
             self.ball_vx > 0
@@ -143,6 +145,7 @@ class PongTrainingEnv:
             self.ball_vx = -abs(self.ball_vx)
             self.last_hit = "right"
             self.steps_since_hit = 0
+            self._apply_shape_spin(False)
 
         done = False
         distance_for_terminal = abs(left_center - self.ball_y)
@@ -179,6 +182,16 @@ class PongTrainingEnv:
     def _left_center(self) -> float:
         return self.left_y + PADDLE_HEIGHT / 2
 
+    def _apply_shape_spin(self, left_hit: bool) -> None:
+        if self.projectile_shape == "ball":
+            return
+        if self.projectile_shape == "square":
+            jitter = self.random.uniform(-2.0, 2.0)
+            self.ball_vy += jitter if left_hit else -jitter
+        elif self.projectile_shape == "triangle":
+            self.ball_vx += self.random.uniform(-3.0, 3.0)
+            self.ball_vy += self.random.uniform(-4.0, 4.0)
+
 
 class PongReinforceTrainer:
     """Simple REINFORCE loop for the Pong policy."""
@@ -191,6 +204,7 @@ class PongReinforceTrainer:
         max_steps: int = 500,
         entropy_coef: float = 0.02,
         seed: int | None = None,
+        projectile_shape: str = "ball",
     ) -> None:
         self.device = device
         self.policy = PongPolicyNetwork().to(self.device)
@@ -198,9 +212,12 @@ class PongReinforceTrainer:
         self.gamma = gamma
         self.max_steps = max_steps
         self.entropy_coef = entropy_coef
-        self.env = PongTrainingEnv(seed=seed)
+        self.projectile_shape = projectile_shape
+        self.env = PongTrainingEnv(seed=seed, projectile_shape=projectile_shape)
+        self.device_label = describe_device(self.device)
 
     def train(self, episodes: int, checkpoint_path: str | None = None) -> None:
+        print(f"[Pong Trainer] Training on {self.device_label} (projectile={self.projectile_shape})")
         for episode in range(1, episodes + 1):
             log_probs: List[torch.Tensor] = []
             rewards: List[float] = []
@@ -253,3 +270,13 @@ class PongReinforceTrainer:
         returns_tensor = (returns_tensor - returns_tensor.mean()) / (returns_tensor.std() + 1e-8)
         log_stack = torch.stack(log_probs)
         return -(returns_tensor * log_stack).sum()
+def describe_device(device: torch.device) -> str:
+    if device.type == "cuda" and torch.cuda.is_available():
+        try:
+            name = torch.cuda.get_device_name(device.index or torch.cuda.current_device())
+        except Exception:
+            name = "CUDA"
+        return f"CUDA ({name})"
+    if device.type == "mps":
+        return "Apple GPU (MPS)"
+    return "CPU"

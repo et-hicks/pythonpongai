@@ -5,6 +5,8 @@ from typing import Tuple
 
 import pygame
 import torch
+import math
+import random
 
 from seeking.game.pong import (
     BALL_DEFAULT_COLOR,
@@ -33,9 +35,11 @@ class PongBattle:
         purple_checkpoint: str,
         device: torch.device,
         sample_actions: bool = False,
+        projectile_shape: str = "ball",
     ) -> None:
         self.device = device
         self.sample_actions = sample_actions
+        self.ball_shape = projectile_shape
         self.green_policy = self._load_policy(green_checkpoint)
         self.purple_policy = self._load_policy(purple_checkpoint)
 
@@ -107,16 +111,30 @@ class PongBattle:
         self.left_paddle.move(left_dir, scale)
         self.right_paddle.move(right_dir, scale)
 
-        self.ball.move(scale)
+        self.ball.move(scale, self.ball_shape)
 
         if self.ball.rect.colliderect(self.left_paddle.rect):
             self.ball.rect.left = self.left_paddle.rect.right
-            self.ball.velocity[0] = abs(self.ball.velocity[0])
             self.ball.color = self.left_paddle.color
+            if self.ball_shape == "triangle":
+                normal = self._triangle_edge_normal((1.0, 0.0))
+                self._reflect_velocity(normal, chaotic=True)
+                self.ball.add_spin(6.0)
+            else:
+                self.ball.velocity[0] = abs(self.ball.velocity[0])
+                if self.ball_shape == "square":
+                    self.ball.add_spin(4.0)
         elif self.ball.rect.colliderect(self.right_paddle.rect):
             self.ball.rect.right = self.right_paddle.rect.left
-            self.ball.velocity[0] = -abs(self.ball.velocity[0])
             self.ball.color = self.right_paddle.color
+            if self.ball_shape == "triangle":
+                normal = self._triangle_edge_normal((-1.0, 0.0))
+                self._reflect_velocity(normal, chaotic=True)
+                self.ball.add_spin(6.0)
+            else:
+                self.ball.velocity[0] = -abs(self.ball.velocity[0])
+                if self.ball_shape == "square":
+                    self.ball.add_spin(4.0)
 
         scored_ball = self.ball.color != BALL_DEFAULT_COLOR
         if self.ball.rect.right < 0:
@@ -166,7 +184,7 @@ class PongBattle:
             pygame.draw.rect(self.screen, NET_COLOR, (WINDOW_WIDTH // 2 - 2, y, 4, 20))
         pygame.draw.rect(self.screen, self.left_paddle.color, self.left_paddle.rect)
         pygame.draw.rect(self.screen, self.right_paddle.color, self.right_paddle.rect)
-        self.ball.draw(self.screen)
+        self.ball.draw(self.screen, self.ball_shape)
         score_text = self.font.render(
             f"LEFT: {self.left_score} (B{self.left_penalties})    RIGHT: {self.right_score} (B{self.right_penalties})",
             True,
@@ -176,17 +194,60 @@ class PongBattle:
         self.screen.blit(score_text, text_rect)
         pygame.display.flip()
 
+    def _triangle_edge_normal(self, target_normal: tuple[float, float]) -> tuple[float, float]:
+        verts = self.ball.triangle_vertices()
+        if not verts:
+            return target_normal
+        normals = []
+        center = self.ball.rect.center
+        for idx in range(3):
+            p1 = verts[idx]
+            p2 = verts[(idx + 1) % 3]
+            edge = (p2[0] - p1[0], p2[1] - p1[1])
+            normal = self._normalize((edge[1], -edge[0]))
+            mid = ((p1[0] + p2[0]) / 2, (p1[1] + p2[1]) / 2)
+            to_center = (center[0] - mid[0], center[1] - mid[1])
+            if normal[0] * to_center[0] + normal[1] * to_center[1] > 0:
+                normal = (-normal[0], -normal[1])
+            normals.append(normal)
+        target_normal = self._normalize(target_normal)
+        normals.sort(key=lambda n: n[0] * target_normal[0] + n[1] * target_normal[1], reverse=True)
+        return normals[0]
+
+    def _reflect_velocity(self, normal: tuple[float, float], chaotic: bool = False) -> None:
+        normal = self._normalize(normal)
+        vx, vy = self.ball.velocity
+        dot = vx * normal[0] + vy * normal[1]
+        vx = vx - 2 * dot * normal[0]
+        vy = vy - 2 * dot * normal[1]
+        if chaotic:
+            angle = random.uniform(-0.12, 0.12)
+            cos_a = math.cos(angle)
+            sin_a = math.sin(angle)
+            vx, vy = vx * cos_a - vy * sin_a, vx * sin_a + vy * cos_a
+        self.ball.velocity[0] = vx
+        self.ball.velocity[1] = vy
+        self.ball._normalize_speed()
+
+    def _normalize(self, vec: tuple[float, float]) -> tuple[float, float]:
+        length = (vec[0] ** 2 + vec[1] ** 2) ** 0.5
+        if length == 0:
+            return (0.0, 0.0)
+        return (vec[0] / length, vec[1] / length)
+
 
 def run_pong_battle(
     green_checkpoint: str,
     purple_checkpoint: str,
     device: torch.device,
     sample_actions: bool = False,
+    projectile_shape: str = "ball",
 ) -> Tuple[str | None, int, int]:
     battle = PongBattle(
         green_checkpoint=green_checkpoint,
         purple_checkpoint=purple_checkpoint,
         device=device,
         sample_actions=sample_actions,
+        projectile_shape=projectile_shape,
     )
     return battle.run()

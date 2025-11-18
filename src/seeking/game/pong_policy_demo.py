@@ -32,9 +32,11 @@ class PongPolicyDemo:
         checkpoint_path: str,
         device: torch.device,
         sample_actions: bool = False,
+        projectile_shape: str = "ball",
     ) -> None:
         self.device = device
         self.sample_actions = sample_actions
+        self.ball_shape = projectile_shape
         self.policy = PongPolicyNetwork().to(self.device)
         ckpt = Path(checkpoint_path)
         if not ckpt.exists():
@@ -92,7 +94,7 @@ class PongPolicyDemo:
         right_dir = self._bot_direction()
         self.right_paddle.move(right_dir, scale)
 
-        self.ball.move(scale)
+        self.ball.move(scale, self.ball_shape)
 
         if self.ball.rect.colliderect(self.left_paddle.rect):
             self.ball.rect.left = self.left_paddle.rect.right
@@ -152,7 +154,7 @@ class PongPolicyDemo:
             pygame.draw.rect(self.screen, NET_COLOR, (WINDOW_WIDTH // 2 - 2, y, 4, 20))
         pygame.draw.rect(self.screen, self.left_paddle.color, self.left_paddle.rect)
         pygame.draw.rect(self.screen, self.right_paddle.color, self.right_paddle.rect)
-        self.ball.draw(self.screen)
+        self.ball.draw(self.screen, self.ball_shape)
         score_text = self.font.render(
             f"LEFT: {self.left_score} (B{self.left_penalties})    RIGHT: {self.right_score} (B{self.right_penalties})",
             True,
@@ -163,6 +165,16 @@ class PongPolicyDemo:
         pygame.display.flip()
 
 
-def run_pong_policy_demo(checkpoint_path: str, device: torch.device, sample_actions: bool = False) -> None:
-    demo = PongPolicyDemo(checkpoint_path=checkpoint_path, device=device, sample_actions=sample_actions)
+def run_pong_policy_demo(
+    checkpoint_path: str,
+    device: torch.device,
+    sample_actions: bool = False,
+    projectile_shape: str = "ball",
+) -> None:
+    demo = PongPolicyDemo(
+        checkpoint_path=checkpoint_path,
+        device=device,
+        sample_actions=sample_actions,
+        projectile_shape=projectile_shape,
+    )
     demo.run()

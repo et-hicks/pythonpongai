@@ -67,6 +67,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Train two Pong agents, run a battle, and promote the winner.",
     )
     parser.add_argument(
+        "--pong-competition-shape",
+        choices=shape_choices,
+        default="ball",
+        help="Projectile shape used during `--pong-competition` training.",
+    )
+    parser.add_argument(
         "--pong-selfplay",
         action="store_true",
         help="Launch the Pong window with both paddles training against each other.",
@@ -110,6 +116,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--pong-battle-sample",
         action="store_true",
         help="Sample actions (instead of greedy) when running the Pong battle UI.",
+    )
+    parser.add_argument(
+        "--pong-run-shape",
+        choices=shape_choices,
+        default="ball",
+        help="Projectile shape used when demoing or battling trained agents.",
     )
     parser.add_argument(
         "--pong-max-steps",
@@ -187,6 +199,7 @@ def main(argv: list[str] | None = None) -> None:
                 max_steps=args.pong_max_steps,
                 entropy_coef=args.pong_entropy_coef,
                 seed=args.seed,
+                projectile_shape=args.pong_train_shape,
             )
             trainer.train(episodes=args.episodes, checkpoint_path=args.pong_checkpoint)
             if args.pong_demo:
@@ -197,6 +210,7 @@ def main(argv: list[str] | None = None) -> None:
                     checkpoint_path=demo_path,
                     device=device,
                     sample_actions=args.pong_demo_sample,
+                    projectile_shape=args.pong_run_shape,
                 )
         elif args.pong_competition:
             from seeking.game.pong_battle import run_pong_battle
@@ -211,6 +225,7 @@ def main(argv: list[str] | None = None) -> None:
                 gamma=args.gamma,
                 entropy_coef=args.pong_entropy_coef,
                 seed=args.seed,
+                projectile_shape=args.pong_competition_shape,
             )
             dual_trainer.train(episodes=args.episodes)
             dual_trainer.save()
@@ -219,6 +234,7 @@ def main(argv: list[str] | None = None) -> None:
                 purple_checkpoint=args.pong_purple_checkpoint,
                 device=device,
                 sample_actions=args.pong_battle_sample,
+                projectile_shape=args.pong_run_shape,
             )
             if winner:
                 dual_trainer.promote_winner("green" if winner == "green" else "purple")
@@ -239,6 +255,7 @@ def main(argv: list[str] | None = None) -> None:
                 checkpoint_path=args.pong_demo,
                 device=device,
                 sample_actions=args.pong_demo_sample,
+                projectile_shape=args.pong_run_shape,
             )
         else:
             from seeking.game.pong import run_pong

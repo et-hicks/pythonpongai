@@ -103,21 +103,21 @@ python -m seeking.main --mode pong --pong-train
 ```
 
 ```bash
-python -m seeking.main --mode pong --pong-train --episodes 500 --lr 5e-4 --pong-checkpoint pong_policy.pt
+python -m seeking.main --mode pong --pong-train --episodes 500 --lr 5e-4 --pong-train-shape square --pong-checkpoint runs/policy_square.pt
 ```
 
 The saved checkpoint can later be loaded with `torch.load` or plugged into `PongPolicyNetwork.load_state_dict` for experimentation.
 
-To watch the trained policy inside the UI, load the checkpoint with the new demo flag:
+To watch the trained policy inside the UI, load the checkpoint with the new demo flag (use `--pong-run-shape` to pick the projectile used during playback):
 
 ```bash
-python -m seeking.main --mode pong --pong-demo pong_policy.pt
+python -m seeking.main --mode pong --pong-demo runs/policy_square.pt --pong-run-shape triangle
 ```
 
 You can also chain training and playback in one go:
 
 ```bash
-python -m seeking.main --mode pong --pong-train --episodes 500 --pong-checkpoint pong_policy.pt --pong-demo pong_policy.pt
+python -m seeking.main --mode pong --pong-train --episodes 500 --pong-train-shape square --pong-checkpoint runs/policy_square.pt --pong-demo runs/policy_square.pt --pong-run-shape triangle
 ```
 
 Shape-specific AIs: pass `--pong-train-shape square` (or `triangle`) to produce a checkpoint like `runs/policy_square.pt`, and use `--pong-green-shape` / `--pong-purple-shape` to point the UI or competition flow at different shapes when two AIs battle.
@@ -127,12 +127,18 @@ Shape-specific AIs: pass `--pong-train-shape square` (or `triangle`) to produce 
 If you want both paddles to keep improving through sparring, use the competition flag. Each invocation trains separate green/purple policies, launches a battle UI so they can fight it out, and then copies the winner into both checkpoints before exiting. The next time you run the command, training resumes from the reigning champion.
 
 ```bash
-python -m seeking.main --mode pong --pong-competition --episodes 500 --pong-green-checkpoint runs/green.pt --pong-purple-checkpoint runs/purple.pt
+python -m seeking.main --mode pong --pong-competition --episodes 500 --pong-green-shape ball --pong-purple-shape square --pong-run-shape triangle
 ```
 
 Close the UI when you are satisfied with the battle; the score at that moment determines the winner.
 
 Pass `--pong-green-shape` / `--pong-purple-shape` (and rely on the default `runs/green_<shape>.pt` naming) to pit differently trained agents against one another, e.g., triangle-vs-square checkpoints.
+
+E.g.
+
+```bash
+python -m seeking.main --mode pong --pong-competition --episodes 500 --pong-green-checkpoint runs/green.pt --pong-purple-checkpoint runs/purple.pt --pong-purple-shape triangle --pong-green-shape triangle
+```
 
 #### Self-play training inside the UI
 

@@ -82,10 +82,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--episodes", type=int, default=50, help="Training episodes.")
     parser.add_argument("--lr", type=float, default=3e-4, help="Trainer learning rate.")
     parser.add_argument("--gamma", type=float, default=0.99, help="Discount factor.")
-    default_device = "cuda" if torch.cuda.is_available() else ("mps" if _has_mps() else "cpu")
     parser.add_argument(
         "--device",
-        default=default_device,
+        default="cpu",
         help="Torch device identifier (e.g., cpu, cuda, mps, or auto).",
     )
     parser.add_argument(

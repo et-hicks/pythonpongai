@@ -3,6 +3,7 @@ from __future__ import annotations
 import random
 from dataclasses import dataclass
 from typing import List
+import time
 
 import torch
 from torch import optim
@@ -219,6 +220,7 @@ class PongReinforceTrainer:
     def train(self, episodes: int, checkpoint_path: str | None = None) -> None:
         print(f"[Pong Trainer] Training on {self.device_label} (projectile={self.projectile_shape})")
         for episode in range(1, episodes + 1):
+            start = time.perf_counter()
             log_probs: List[torch.Tensor] = []
             rewards: List[float] = []
             entropies: List[torch.Tensor] = []
@@ -249,10 +251,11 @@ class PongReinforceTrainer:
             total_loss.backward()
             self.optimizer.step()
 
+            duration = time.perf_counter() - start
             if episode % 10 == 0:
                 avg_reward = episode_reward / len(rewards) if rewards else 0.0
                 print(f"[Pong Trainer] Episode {episode:04d}  Total reward: {episode_reward:.2f}  "
-                      f"Avg step reward: {avg_reward:.4f}")
+                      f"Avg step reward: {avg_reward:.4f}  ({duration:.2f}s)")
 
         if checkpoint_path:
             torch.save(self.policy.state_dict(), checkpoint_path)

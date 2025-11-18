@@ -57,8 +57,8 @@ class Ball:
         self.color = BALL_DEFAULT_COLOR
         self._x_float = float(self.rect.x)
         self._y_float = float(self.rect.y)
-        self.angle = random.uniform(0, math.tau)
-        self.angular_velocity = random.uniform(-3.0, 3.0)
+        self.angle = None
+        self.angular_velocity = None
         self.reset()
 
     def reset(self) -> None:
@@ -74,8 +74,10 @@ class Ball:
         self.velocity[0] = horizontal * BALL_SPEED / magnitude
         self.velocity[1] = vertical * BALL_SPEED / magnitude
         self.color = BALL_DEFAULT_COLOR
-        self.angle = random.uniform(0, math.tau)
-        self.angular_velocity = random.uniform(-3.0, 3.0)
+        if self.angle is not None:
+            self.angle = random.uniform(0, math.tau)
+        if self.angular_velocity is not None:
+            self.angular_velocity = random.uniform(-3.0, 3.0)
 
     def move(self, scale: float = 1.0, shape: str = "ball") -> None:
         self._x_float += self.velocity[0] * scale
@@ -88,7 +90,13 @@ class Ball:
             if shape != "ball":
                 self._apply_wall_spin(shape)
         if shape in {"triangle", "square"}:
+            if self.angle is None:
+                self.angle = random.uniform(0, math.tau)
+                self.angular_velocity = random.uniform(-3.0, 3.0)
             self.angle = (self.angle + math.radians(self.angular_velocity) * scale) % (2 * math.pi)
+        else:
+            self.angle = None
+            self.angular_velocity = None
 
     def draw(self, surface: pygame.Surface, shape: str = "ball") -> None:
         if shape == "square":
@@ -115,7 +123,7 @@ class Ball:
             pygame.draw.circle(surface, self.color, self.rect.center, BALL_RADIUS)
 
     def triangle_vertices(self) -> list[tuple[float, float]]:
-        if not hasattr(self, "angle"):
+        if not hasattr(self, "angle") or self.angle is None:
             return []
         center = (self._x_float + BALL_RADIUS, self._y_float + BALL_RADIUS)
         vertices = []
@@ -127,7 +135,7 @@ class Ball:
         return vertices
 
     def square_vertices(self) -> list[tuple[float, float]]:
-        if not hasattr(self, "angle"):
+        if not hasattr(self, "angle") or self.angle is None:
             return []
         center = (self._x_float + BALL_RADIUS, self._y_float + BALL_RADIUS)
         half = BALL_RADIUS
@@ -523,7 +531,8 @@ class PongGame:
             return
         if self.ball_shape == "square":
             self.ball.velocity[1] += random.uniform(-2.0, 2.0)
-            self.ball.add_spin(4.0)
+            if self.ball.angle is not None:
+                self.ball.add_spin(4.0)
             self.ball._normalize_speed()
         elif self.ball_shape == "triangle":
             # handled by reflection logic

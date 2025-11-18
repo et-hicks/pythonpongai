@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import random
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Tuple
@@ -287,6 +288,7 @@ class PongDualTrainer:
             f"(projectile={self.projectile_shape})"
         )
         for episode in range(1, episodes + 1):
+            start = time.perf_counter()
             left_state, right_state = self.env.reset()
             left_log_probs: List[torch.Tensor] = []
             right_log_probs: List[torch.Tensor] = []
@@ -331,8 +333,9 @@ class PongDualTrainer:
                 right_entropies,
             )
 
+            duration = time.perf_counter() - start
             if episode % 10 == 0:
-                print(f"[Pong Dual Trainer] Completed episode {episode:04d}")
+                print(f"[Pong Dual Trainer] Completed episode {episode:04d} ({duration:.2f}s)")
 
     def _update_policy(
         self,

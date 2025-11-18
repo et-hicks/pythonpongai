@@ -82,7 +82,7 @@ Logs are printed through `rich` every few episodes. Edit `Trainer` to plug in ad
 
 ### WebSocket streaming backend
 
-Frontend experiments can stream gameplay data to a lightweight FastAPI server. The backend now logs each payload and feeds quantized grid snapshots through two neural controllers (Deep Q for the green paddle, actor-critic for the purple paddle). Their raw outputs are echoed back to the browser so you can immediately see what the untrained heads would decide.
+Frontend experiments can stream gameplay data to a lightweight FastAPI server. The backend now logs each payload and feeds quantized grid snapshots through two neural controllers (Deep Q for the green paddle, actor-critic for the purple paddle). Their raw outputs are echoed back to the browser so you can immediately see what the untrained heads would decide, and the same stream is used to train the networks online.
 
 1. Install the dependencies (if you have already run `pip install -e .`, FastAPI and Uvicorn are included).
 2. Start the server:
@@ -102,7 +102,24 @@ Frontend experiments can stream gameplay data to a lightweight FastAPI server. T
 }
 ```
 
-The models are untrained stubs, but the plumbing is in place so you can start training/checkpointing them and piping the actions back to the client in real time.
+Send structured payloads when you want to annotate events or disable inference:
+
+```json
+{
+  "grid": "0 0 0 | ... .",
+  "events": {"green_scored": true, "round_over": true}
+}
+```
+
+Each round the server rewards the paddle that scores (+1) and punishes the paddle that gets scored on (-1). Staying neutral for too many consecutive frames incurs a small penalty so the agents are encouraged to move. Those rewards update a tiny DQN replay buffer for the green paddle and a one-step actor-critic optimizer for the purple paddle, so playing more frames directly improves the checkpointed models.
+
+Validation-only runs: start uvicorn with `SKIP_PREDICTIONS=1` (alias `SEEKING_SKIP_PREDICTIONS=1`) to disable inference/training entirely:
+
+```bash
+SKIP_PREDICTIONS=1 uvicorn seeking.server.websocket_server:app --reload --host 0.0.0.0 --port 8000
+```
+
+You can also connect via `ws://localhost:8000/ws/game?skip_predictions=1` to toggle it per WebSocket connection and simply sanity-check the incoming data stream.
 
 ### Quantized Pong controllers
 

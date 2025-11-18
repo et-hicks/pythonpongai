@@ -19,6 +19,7 @@ from seeking.game.pong import (
     PADDLE_WIDTH,
     RIGHT_COLOR,
     SCORE_COLOR,
+    TARGET_FPS,
     WINDOW_HEIGHT,
     WINDOW_WIDTH,
     Ball,
@@ -113,11 +114,11 @@ class SelfPlayPong:
     def run(self) -> None:
         try:
             while self.running:
+                dt = self.clock.tick(TARGET_FPS) / 1000.0
                 self._handle_events()
                 if not self.paused:
-                    self._step_training()
+                    self._step_training(dt * TARGET_FPS)
                 self._render()
-                self.clock.tick(120)
         finally:
             self._save_checkpoint()
             pygame.quit()
@@ -132,7 +133,7 @@ class SelfPlayPong:
                 elif event.key == pygame.K_SPACE:
                     self.paused = not self.paused
 
-    def _step_training(self) -> None:
+    def _step_training(self, scale: float) -> None:
         left_state = self._build_state(
             self.left_paddle.rect,
             self.right_paddle.rect,
@@ -147,8 +148,8 @@ class SelfPlayPong:
         left_action, left_log_prob = self._sample_action(self.left_policy, left_state)
         right_action, right_log_prob = self._sample_action(self.right_policy, right_state)
 
-        self.left_paddle.move(-1 if left_action == 0 else 1)
-        self.right_paddle.move(-1 if right_action == 0 else 1)
+        self.left_paddle.move(-1 if left_action == 0 else 1, scale)
+        self.right_paddle.move(-1 if right_action == 0 else 1, scale)
         if abs(self.left_paddle.rect.y - self.left_prev_y) < IDLE_DELTA:
             self.left_idle_steps += 1
         else:
@@ -160,7 +161,7 @@ class SelfPlayPong:
         self.left_prev_y = self.left_paddle.rect.y
         self.right_prev_y = self.right_paddle.rect.y
 
-        self.ball.move()
+        self.ball.move(scale)
         left_reward = 0.0
         right_reward = 0.0
         self.steps_since_hit += 1

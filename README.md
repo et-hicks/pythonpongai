@@ -90,6 +90,8 @@ Launch a local Pong battle powered by Pygame. The left paddle uses `W`/`A` to mo
 python -m seeking.main --mode pong
 ```
 
+On boot you'll see a simple in-game menu: press `1` for classic two-player, `2` for human vs AI (right paddle tracks with the current checkpoint), or `3` for AI vs AI. Use the left/right arrows on the menu to cycle the projectile between a ball, square, or triangle—your choice is shown at the top during gameplay. When you choose AI vs AI and close the window, the paddle with the higher score overwrites both checkpoints so the reigning champion is used next time. Press `ESC` to open the pause overlay where you can resume or jump back to the main menu (returning from AI vs AI through this menu will also promote the current winner before showing the menu). By default the human/AI modes look for checkpoints under `runs/green_<shape>.pt` and `runs/purple_<shape>.pt`; create those files via `--pong-train`/`--pong-competition` or point the CLI flags elsewhere (`--pong-green-shape`, `--pong-purple-shape`).
+
 #### Training the Pong agent
 
 Flip on the `--pong-train` flag to launch a lightweight REINFORCE trainer that builds a four-layer feed-forward network with two hidden layers (64 and 32 units with ReLU). The model ingests a normalized `(6,)` state vector containing your paddle's top/bottom, the opponent paddle's top/bottom, the current score differential, and the ball's vertical position, and emits unnormalized logits for the two discrete actions (`move_up`, `move_down`). The trainer can run on CPU or GPU (set via `--device`) and saves a standard `state_dict` when `--pong-checkpoint` is provided.
@@ -117,6 +119,20 @@ You can also chain training and playback in one go:
 ```bash
 python -m seeking.main --mode pong --pong-train --episodes 500 --pong-checkpoint pong_policy.pt --pong-demo pong_policy.pt
 ```
+
+Shape-specific AIs: pass `--pong-train-shape square` (or `triangle`) to produce a checkpoint like `runs/policy_square.pt`, and use `--pong-green-shape` / `--pong-purple-shape` to point the UI or competition flow at different shapes when two AIs battle.
+
+#### Competitive loop (train → battle → promote)
+
+If you want both paddles to keep improving through sparring, use the competition flag. Each invocation trains separate green/purple policies, launches a battle UI so they can fight it out, and then copies the winner into both checkpoints before exiting. The next time you run the command, training resumes from the reigning champion.
+
+```bash
+python -m seeking.main --mode pong --pong-competition --episodes 500 --pong-green-checkpoint runs/green.pt --pong-purple-checkpoint runs/purple.pt
+```
+
+Close the UI when you are satisfied with the battle; the score at that moment determines the winner.
+
+Pass `--pong-green-shape` / `--pong-purple-shape` (and rely on the default `runs/green_<shape>.pt` naming) to pit differently trained agents against one another, e.g., triangle-vs-square checkpoints.
 
 #### Self-play training inside the UI
 

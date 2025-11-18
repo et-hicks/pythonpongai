@@ -19,6 +19,13 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         default="play",
         help="Run interactive play or headless training.",
     )
+    shape_choices = ["ball", "square", "triangle"]
+    parser.add_argument(
+        "--pong-shape",
+        choices=shape_choices,
+        default="ball",
+        help="Default projectile shape for Pong gameplay.",
+    )
     parser.add_argument("--width", type=int, default=10)
     parser.add_argument("--height", type=int, default=10)
     parser.add_argument("--obstacles", type=int, default=10)
@@ -35,6 +42,29 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--pong-train",
         action="store_true",
         help="Train the Pong RL agent instead of launching the playable window.",
+    )
+    parser.add_argument(
+        "--pong-train-shape",
+        choices=shape_choices,
+        default="ball",
+        help="Shape used for single-agent Pong training checkpoints.",
+    )
+    parser.add_argument(
+        "--pong-green-shape",
+        choices=shape_choices,
+        default="ball",
+        help="Shape associated with the green (left) Pong policy checkpoints.",
+    )
+    parser.add_argument(
+        "--pong-purple-shape",
+        choices=shape_choices,
+        default="ball",
+        help="Shape associated with the purple (right) Pong policy checkpoints.",
+    )
+    parser.add_argument(
+        "--pong-competition",
+        action="store_true",
+        help="Train two Pong agents, run a battle, and promote the winner.",
     )
     parser.add_argument(
         "--pong-selfplay",
@@ -54,6 +84,18 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Optional path to save the trained Pong policy (state_dict).",
     )
     parser.add_argument(
+        "--pong-green-checkpoint",
+        type=str,
+        default=None,
+        help="Checkpoint path for the green (left) Pong policy.",
+    )
+    parser.add_argument(
+        "--pong-purple-checkpoint",
+        type=str,
+        default=None,
+        help="Checkpoint path for the purple (right) Pong policy.",
+    )
+    parser.add_argument(
         "--pong-demo",
         type=str,
         default=None,
@@ -63,6 +105,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--pong-demo-sample",
         action="store_true",
         help="Sample actions (instead of greedy) when running the Pong demo.",
+    )
+    parser.add_argument(
+        "--pong-battle-sample",
+        action="store_true",
+        help="Sample actions (instead of greedy) when running the Pong battle UI.",
     )
     parser.add_argument(
         "--pong-max-steps",
@@ -95,15 +142,27 @@ def build_env(args: argparse.Namespace, headless: bool) -> GridWorld:
 
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv or sys.argv[1:])
+    if args.pong_checkpoint is None:
+        args.pong_checkpoint = f"runs/policy_{args.pong_train_shape}.pt"
+    if args.pong_green_checkpoint is None:
+        args.pong_green_checkpoint = f"runs/green_{args.pong_green_shape}.pt"
+    if args.pong_purple_checkpoint is None:
+        args.pong_purple_checkpoint = f"runs/purple_{args.pong_purple_shape}.pt"
     if args.mode == "train":
         env = build_env(args, headless=True)
         policy = PolicyNetwork(env.observation_space_size, env.action_space_size)
         trainer = Trainer(env, policy, lr=args.lr, gamma=args.gamma, device=args.device)
         trainer.train(episodes=args.episodes)
     elif args.mode == "pong":
-        if args.pong_selfplay and (args.pong_train or args.pong_demo):
+        toggles = [
+            args.pong_selfplay,
+            args.pong_train,
+            args.pong_demo is not None,
+            args.pong_competition,
+        ]
+        if sum(bool(t) for t in toggles) > 1:
             print(
-                "Choose either --pong-selfplay, --pong-train, or --pong-demo (only one at a time).",
+                "Choose only one of --pong-selfplay, --pong-train, --pong-demo, or --pong-competition.",
                 file=sys.stderr,
             )
             raise SystemExit(2)
@@ -139,6 +198,39 @@ def main(argv: list[str] | None = None) -> None:
                     device=device,
                     sample_actions=args.pong_demo_sample,
                 )
+        elif args.pong_competition:
+            from seeking.game.pong_battle import run_pong_battle
+            from seeking.rl.pong_dual_trainer import PongDualTrainer
+
+            device = torch.device(args.device)
+            dual_trainer = PongDualTrainer(
+                device=device,
+                green_checkpoint=args.pong_green_checkpoint,
+                purple_checkpoint=args.pong_purple_checkpoint,
+                lr=args.lr,
+                gamma=args.gamma,
+                entropy_coef=args.pong_entropy_coef,
+                seed=args.seed,
+            )
+            dual_trainer.train(episodes=args.episodes)
+            dual_trainer.save()
+            winner, left_score, right_score = run_pong_battle(
+                green_checkpoint=args.pong_green_checkpoint,
+                purple_checkpoint=args.pong_purple_checkpoint,
+                device=device,
+                sample_actions=args.pong_battle_sample,
+            )
+            if winner:
+                dual_trainer.promote_winner("green" if winner == "green" else "purple")
+                print(
+                    f"[Pong Competition] Winner: {winner.upper()} "
+                    f"(score {left_score} - {right_score}). Both checkpoints updated."
+                )
+            else:
+                print(
+                    f"[Pong Competition] Battle ended in a tie ({left_score} - {right_score}). "
+                    "Checkpoints left unchanged."
+                )
         elif args.pong_demo:
             from seeking.game.pong_policy_demo import run_pong_policy_demo
 
@@ -151,7 +243,15 @@ def main(argv: list[str] | None = None) -> None:
         else:
             from seeking.game.pong import run_pong
 
-            run_pong()
+            device = torch.device(args.device)
+            run_pong(
+                device=device,
+                green_checkpoint=args.pong_green_checkpoint,
+                purple_checkpoint=args.pong_purple_checkpoint,
+                default_shape=args.pong_shape,
+                green_shape=args.pong_green_shape,
+                purple_shape=args.pong_purple_shape,
+            )
     else:
         if args.headless:
             print("Interactive mode requires Arcade window. Remove --headless.", file=sys.stderr)

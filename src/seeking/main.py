@@ -11,6 +11,55 @@ from seeking.rl.policy import PolicyNetwork
 from seeking.rl.trainer import Trainer
 
 
+def _has_mps() -> bool:
+    return hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
+
+
+def resolve_device(device_arg: str) -> torch.device:
+    arg = (device_arg or "cpu").lower()
+    if arg == "auto":
+        if torch.cuda.is_available():
+            return torch.device("cuda")
+        if _has_mps():
+            return torch.device("mps")
+        return torch.device("cpu")
+    if arg == "cuda":
+        if torch.cuda.is_available():
+            return torch.device("cuda")
+        if _has_mps():
+            return torch.device("mps")
+        return torch.device("cpu")
+    if arg == "mps":
+        if _has_mps():
+            return torch.device("mps")
+        if torch.cuda.is_available():
+            return torch.device("cuda")
+        return torch.device("cpu")
+    return torch.device(device_arg)
+
+
+def device_to_arg(device: torch.device) -> str:
+    if device.index is not None:
+        return f"{device.type}:{device.index}"
+    return device.type
+
+
+def describe_device(device: torch.device) -> str:
+    if device.type == "cuda" and torch.cuda.is_available():
+        try:
+            name = torch.cuda.get_device_name(device.index or torch.cuda.current_device())
+        except Exception:
+            name = "CUDA"
+        return f"CUDA ({name})"
+    if device.type == "mps":
+        return "Apple GPU (MPS)"
+    return "CPU"
+
+
+def shape_label(shape: str) -> str:
+    return "circle" if shape == "ball" else shape
+
+
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Arcade + PyTorch playground.")
     parser.add_argument(
@@ -33,10 +82,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--episodes", type=int, default=50, help="Training episodes.")
     parser.add_argument("--lr", type=float, default=3e-4, help="Trainer learning rate.")
     parser.add_argument("--gamma", type=float, default=0.99, help="Discount factor.")
+    default_device = "cuda" if torch.cuda.is_available() else ("mps" if _has_mps() else "cpu")
     parser.add_argument(
         "--device",
-        default="cuda" if torch.cuda.is_available() else "cpu",
-        help="Torch device identifier.",
+        default=default_device,
+        help="Torch device identifier (e.g., cpu, cuda, mps, or auto).",
     )
     parser.add_argument(
         "--pong-train",
@@ -154,16 +204,20 @@ def build_env(args: argparse.Namespace, headless: bool) -> GridWorld:
 
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv or sys.argv[1:])
+    resolved_device = resolve_device(args.device)
+    device_string = device_to_arg(resolved_device)
+    device_label = describe_device(resolved_device)
     if args.pong_checkpoint is None:
-        args.pong_checkpoint = f"runs/policy_{args.pong_train_shape}.pt"
+        args.pong_checkpoint = f"runs/policy_{shape_label(args.pong_train_shape)}.pt"
     if args.pong_green_checkpoint is None:
-        args.pong_green_checkpoint = f"runs/green_{args.pong_green_shape}.pt"
+        args.pong_green_checkpoint = f"runs/green_{shape_label(args.pong_green_shape)}.pt"
     if args.pong_purple_checkpoint is None:
-        args.pong_purple_checkpoint = f"runs/purple_{args.pong_purple_shape}.pt"
+        args.pong_purple_checkpoint = f"runs/purple_{shape_label(args.pong_purple_shape)}.pt"
     if args.mode == "train":
         env = build_env(args, headless=True)
         policy = PolicyNetwork(env.observation_space_size, env.action_space_size)
-        trainer = Trainer(env, policy, lr=args.lr, gamma=args.gamma, device=args.device)
+        trainer = Trainer(env, policy, lr=args.lr, gamma=args.gamma, device=device_string)
+        print(f"[Trainer] Using {device_label}")
         trainer.train(episodes=args.episodes)
     elif args.mode == "pong":
         toggles = [
@@ -181,9 +235,8 @@ def main(argv: list[str] | None = None) -> None:
         if args.pong_selfplay:
             from seeking.game.pong_selfplay import run_pong_selfplay
 
-            device = torch.device(args.device)
             run_pong_selfplay(
-                device=device,
+                device=resolved_device,
                 lr=args.lr,
                 gamma=args.gamma,
                 checkpoint_path=args.pong_selfplay_checkpoint,
@@ -191,9 +244,8 @@ def main(argv: list[str] | None = None) -> None:
         elif args.pong_train:
             from seeking.rl.pong_trainer import PongReinforceTrainer
 
-            device = torch.device(args.device)
             trainer = PongReinforceTrainer(
-                device=device,
+                device=resolved_device,
                 lr=args.lr,
                 gamma=args.gamma,
                 max_steps=args.pong_max_steps,
@@ -208,7 +260,7 @@ def main(argv: list[str] | None = None) -> None:
 
                 run_pong_policy_demo(
                     checkpoint_path=demo_path,
-                    device=device,
+                    device=resolved_device,
                     sample_actions=args.pong_demo_sample,
                     projectile_shape=args.pong_run_shape,
                 )
@@ -216,9 +268,8 @@ def main(argv: list[str] | None = None) -> None:
             from seeking.game.pong_battle import run_pong_battle
             from seeking.rl.pong_dual_trainer import PongDualTrainer
 
-            device = torch.device(args.device)
             dual_trainer = PongDualTrainer(
-                device=device,
+                device=resolved_device,
                 green_checkpoint=args.pong_green_checkpoint,
                 purple_checkpoint=args.pong_purple_checkpoint,
                 lr=args.lr,
@@ -232,7 +283,7 @@ def main(argv: list[str] | None = None) -> None:
             winner, left_score, right_score = run_pong_battle(
                 green_checkpoint=args.pong_green_checkpoint,
                 purple_checkpoint=args.pong_purple_checkpoint,
-                device=device,
+                device=resolved_device,
                 sample_actions=args.pong_battle_sample,
                 projectile_shape=args.pong_run_shape,
             )
@@ -250,19 +301,17 @@ def main(argv: list[str] | None = None) -> None:
         elif args.pong_demo:
             from seeking.game.pong_policy_demo import run_pong_policy_demo
 
-            device = torch.device(args.device)
             run_pong_policy_demo(
                 checkpoint_path=args.pong_demo,
-                device=device,
+                device=resolved_device,
                 sample_actions=args.pong_demo_sample,
                 projectile_shape=args.pong_run_shape,
             )
         else:
             from seeking.game.pong import run_pong
 
-            device = torch.device(args.device)
             run_pong(
-                device=device,
+                device=resolved_device,
                 green_checkpoint=args.pong_green_checkpoint,
                 purple_checkpoint=args.pong_purple_checkpoint,
                 default_shape=args.pong_shape,

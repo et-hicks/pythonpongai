@@ -189,8 +189,8 @@ class PongGame:
         self.right_penalties = 0
         self.rally_hits = 0
         self.device = device or torch.device("cpu")
-        self.green_checkpoint = Path(green_checkpoint) if green_checkpoint else None
-        self.purple_checkpoint = Path(purple_checkpoint) if purple_checkpoint else None
+        self.green_checkpoint_arg = Path(green_checkpoint) if green_checkpoint else None
+        self.purple_checkpoint_arg = Path(purple_checkpoint) if purple_checkpoint else None
         self.green_policy: PongPolicyNetwork | None = None
         self.purple_policy: PongPolicyNetwork | None = None
         self.green_shape = green_shape
@@ -457,8 +457,22 @@ class PongGame:
         self.ball.reset()
 
     def _load_policies(self) -> None:
-        self.green_policy = self._load_policy(self.green_checkpoint)
-        self.purple_policy = self._load_policy(self.purple_checkpoint)
+        green_path = self._checkpoint_path("green", self.green_shape)
+        purple_path = self._checkpoint_path("purple", self.purple_shape)
+        self.green_policy = self._load_policy(green_path)
+        self.purple_policy = self._load_policy(purple_path)
+
+    def _checkpoint_path(self, color: str, shape: str) -> Path:
+        override = self.green_checkpoint_arg if color == "green" else self.purple_checkpoint_arg
+        if override:
+            return override
+        label = self._shape_label(shape)
+        return Path("runs") / f"{color}_{label}.pt"
+
+    def _shape_label(self, shape: str) -> str:
+        if shape == "ball":
+            return "circle"
+        return shape
 
     def _load_policy(self, path: Optional[Path]) -> PongPolicyNetwork | None:
         if not path:
@@ -564,16 +578,26 @@ class PongGame:
             self.ai_vs_ai_used = False
             return
         winner_policy = self.green_policy if self.left_score > self.right_score else self.purple_policy
-        if winner_policy is None or not self.green_checkpoint or not self.purple_checkpoint:
-            print("[Pong] AI vs AI completed, but checkpoints missing; cannot promote winner.")
+        current_shape = self.ball_shape
+        if not (
+            winner_policy
+            and self.green_shape == self.purple_shape
+            and self.green_shape == current_shape
+        ):
+            print(
+                "[Pong] AI vs AI completed, but shapes differed or policy missing. "
+                "Checkpoints unchanged."
+            )
             self.ai_vs_ai_used = False
             return
+        green_path = self._checkpoint_path("green", current_shape)
+        purple_path = self._checkpoint_path("purple", current_shape)
         winner_name = "GREEN" if self.left_score > self.right_score else "PURPLE"
         payload = winner_policy.state_dict()
-        self.green_checkpoint.parent.mkdir(parents=True, exist_ok=True)
-        self.purple_checkpoint.parent.mkdir(parents=True, exist_ok=True)
-        torch.save(payload, self.green_checkpoint)
-        torch.save(payload, self.purple_checkpoint)
+        green_path.parent.mkdir(parents=True, exist_ok=True)
+        purple_path.parent.mkdir(parents=True, exist_ok=True)
+        torch.save(payload, green_path)
+        torch.save(payload, purple_path)
         print(f"[Pong] AI vs AI winner: {winner_name}. Checkpoints updated.")
         self.ai_vs_ai_used = False
 

@@ -90,7 +90,7 @@ Launch a local Pong battle powered by Pygame. The left paddle uses `W`/`A` to mo
 python -m seeking.main --mode pong
 ```
 
-On boot you'll see a simple in-game menu: press `1` for classic two-player, `2` for human vs AI (right paddle tracks with the current checkpoint), or `3` for AI vs AI. Use the left/right arrows on the menu to cycle the projectile between a ball, square, or triangle—your choice is shown at the top during gameplay. When you choose AI vs AI and close the window, the paddle with the higher score overwrites both checkpoints so the reigning champion is used next time. Press `ESC` to open the pause overlay where you can resume or jump back to the main menu (returning from AI vs AI through this menu will also promote the current winner before showing the menu). By default the human/AI modes look for checkpoints under `runs/green_<shape>.pt` and `runs/purple_<shape>.pt`; create those files via `--pong-train`/`--pong-competition` or point the CLI flags elsewhere (`--pong-green-shape`, `--pong-purple-shape`).
+On boot you'll see a simple in-game menu: press `1` for classic two-player, `2` for human vs AI (right paddle tracks with the current checkpoint), or `3` for AI vs AI. Use the left/right arrows on the menu to cycle the projectile between a ball, square, or triangle—your choice is shown at the top during gameplay. When you choose AI vs AI and close the window, the paddle with the higher score overwrites both checkpoints so the reigning champion is used next time. Press `ESC` to open the pause overlay where you can resume or jump back to the main menu (returning from AI vs AI through this menu will also promote the current winner before showing the menu). By default the human/AI modes look for checkpoints under `runs/green_<shape>.pt` and `runs/purple_<shape>.pt` where `<shape>` is `circle`, `square`, or `triangle`; create those files via `--pong-train`/`--pong-competition` or point the CLI flags elsewhere (`--pong-green-shape`, `--pong-purple-shape`).
 
 #### Training the Pong agent
 
@@ -132,12 +132,28 @@ python -m seeking.main --mode pong --pong-competition --episodes 500 --pong-gree
 
 Close the UI when you are satisfied with the battle; the score at that moment determines the winner.
 
-Pass `--pong-green-shape` / `--pong-purple-shape` (and rely on the default `runs/green_<shape>.pt` naming) to pit differently trained agents against one another, e.g., triangle-vs-square checkpoints.
+Pass `--pong-green-shape` / `--pong-purple-shape` (and rely on the default `runs/green_<shape>.pt` naming, e.g., `green_circle.pt`) to pit differently trained agents against one another, e.g., triangle-vs-square checkpoints.
+
+## Apple Silicon (M1/M2) GPU usage
+
+PyTorch can leverage the Apple GPU via Metal Performance Shaders (MPS). If you installed a recent `torch` wheel, just pass `--device mps` (or set `TORCH_DEVICE=mps`) when running any training command:
+
+```bash
+python -m seeking.main --mode pong --pong-train --device mps
+```
+
+If you want training/battle commands to automatically attempt the MPS device, we include a helper flag: add `--device auto` and the CLI will try `cuda`, then `mps`, and finally fall back to `cpu`. Use it like so:
+
+```bash
+python -m seeking.main --mode pong --device auto --pong-train --pong-train-shape triangle
+```
+
+Ensure you have at least Python 3.10 and the official PyTorch builds for macOS arm64 installed.。
 
 E.g.
 
 ```bash
-python -m seeking.main --mode pong --pong-competition --episodes 500 --pong-green-checkpoint runs/green.pt --pong-purple-checkpoint runs/purple.pt --pong-purple-shape triangle --pong-green-shape triangle
+python -m seeking.main --mode pong --pong-competition --episodes 500 --pong-green-checkpoint runs/green_circle.pt --pong-purple-checkpoint runs/purple_circle.pt --pong-purple-shape triangle --pong-green-shape triangle --pong-run-shape triangle
 ```
 
 #### Self-play training inside the UI

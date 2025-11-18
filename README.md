@@ -44,9 +44,7 @@ All commands run from the repository root.
    python3 -m venv .venv
    source .venv/bin/activate
    ```
-
-   On Windows PowerShell: `.\.venv\Scripts\Activate.ps1`
-
+   
 2. Upgrade pip and install dependencies (editable install keeps imports tidy).
 
    ```bash
@@ -81,6 +79,30 @@ python -m seeking.main --mode train --episodes 200 --lr 5e-4 --gamma 0.95 --seed
 ```
 
 Logs are printed through `rich` every few episodes. Edit `Trainer` to plug in advanced algorithms, value heads, replay buffers, etc. The environment exposes normalized observations (`np.float32`), discrete actions, and convenience helpers for sampling and rendering.
+
+### WebSocket streaming backend
+
+Frontend experiments can stream gameplay data to a lightweight FastAPI server. The backend simply logs each message so you can confirm what the UI is sending before hooking it up to real models.
+
+1. Install the dependencies (if you have already run `pip install -e .`, FastAPI and Uvicorn are included).
+2. Start the server:
+
+   ```bash
+   uvicorn seeking.server.websocket_server:app --reload --host 0.0.0.0 --port 8000
+   ```
+
+3. Connect from the frontend via `ws://localhost:8000/ws/game` and send JSON/text frames. Every payload is printed to the terminal along with the client address.
+
+A minimal browser snippet looks like:
+
+```js
+const ws = new WebSocket("ws://localhost:8000/ws/game");
+ws.onopen = () => {
+  ws.send(JSON.stringify({ type: "pong_state", ball: { x: 10, y: 20 } }));
+};
+```
+
+You should see the structured JSON payload logged in the terminal where Uvicorn is running.
 
 ### Pygame Pong
 

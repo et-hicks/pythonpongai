@@ -82,7 +82,7 @@ Logs are printed through `rich` every few episodes. Edit `Trainer` to plug in ad
 
 ### WebSocket streaming backend
 
-Frontend experiments can stream gameplay data to a lightweight FastAPI server. The backend simply logs each message so you can confirm what the UI is sending before hooking it up to real models.
+Frontend experiments can stream gameplay data to a lightweight FastAPI server. The backend now logs each payload and feeds quantized grid snapshots through two neural controllers (Deep Q for the green paddle, actor-critic for the purple paddle). Their raw outputs are echoed back to the browser so you can immediately see what the untrained heads would decide.
 
 1. Install the dependencies (if you have already run `pip install -e .`, FastAPI and Uvicorn are included).
 2. Start the server:
@@ -91,18 +91,28 @@ Frontend experiments can stream gameplay data to a lightweight FastAPI server. T
    uvicorn seeking.server.websocket_server:app --reload --host 0.0.0.0 --port 8000
    ```
 
-3. Connect from the frontend via `ws://localhost:8000/ws/game` and send JSON/text frames. Every payload is printed to the terminal along with the client address.
+3. Connect from the frontend via `ws://localhost:8000/ws/game` and send the ASCII grid shown earlier (columns of `0`, paddles rendered as `|`, ball rendered as `.`). Every payload is printed, then decoded into a `(channels, rows, cols)` tensor and passed through both controllers.
+4. The server responds with a JSON blob describing the predicted paddle move for the green (DQN) and purple (actor-critic) paddles:
 
-A minimal browser snippet looks like:
-
-```js
-const ws = new WebSocket("ws://localhost:8000/ws/game");
-ws.onopen = () => {
-  ws.send(JSON.stringify({ type: "pong_state", ball: { x: 10, y: 20 } }));
-};
+```json
+{
+  "type": "model_actions",
+  "green": {"action": "up", "q_values": [-0.02, -0.11, 0.05]},
+  "purple": {"action": "neutral", "logits": [-0.03, 0.02, 0.12], "value": 0.004}
+}
 ```
 
-You should see the structured JSON payload logged in the terminal where Uvicorn is running.
+The models are untrained stubs, but the plumbing is in place so you can start training/checkpointing them and piping the actions back to the client in real time.
+
+### Quantized Pong controllers
+
+`seeking.rl.pong_quantized_models` introduces:
+
+- `QuantizedStateEncoder` – converts the ASCII board (0/|/.) into a three-channel tensor (empty/paddle/ball).
+- `PongDQN` – convolutional encoder + linear head (3 actions) intended for the green paddle.
+- `PongActorCritic` – shared encoder with separate policy/value heads for the purple paddle.
+
+Both expose `.act(...)` helpers so they can be slotted into streaming or offline trainers. Swap in your trained weights, then extend the FastAPI server to load checkpoints on boot to drive the live paddle decisions.
 
 ### Pygame Pong
 

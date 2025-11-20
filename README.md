@@ -82,7 +82,7 @@ Logs are printed through `rich` every few episodes. Edit `Trainer` to plug in ad
 
 ### WebSocket streaming backend
 
-Frontend experiments can stream gameplay data to a lightweight FastAPI server. The backend logs each payload, feeds quantized grid snapshots through two neural controllers (Deep Q for green, actor-critic for purple), and simultaneously issues deterministic alternating commands (0.5 s up, 0.5 s down) so the UI has predictable inputs while the models continue to learn in the background.
+Frontend experiments can stream gameplay data to a lightweight FastAPI server. The backend logs each payload, feeds quantized grid snapshots through two neural controllers (Deep Q for green, actor-critic for purple), and trains them online while returning their predicted actions to the frontend every frame.
 
 1. Install the dependencies (if you have already run `pip install -e .`, FastAPI and Uvicorn are included).
 2. Start the server:
@@ -92,17 +92,15 @@ Frontend experiments can stream gameplay data to a lightweight FastAPI server. T
    ```
 
 3. Connect from the frontend via `ws://localhost:8000/ws/game` and send the ASCII grid shown earlier (columns of `0`, paddles rendered as `|`, ball rendered as `.`). Every payload is printed, then decoded into a `(channels, rows, cols)` tensor and passed through both controllers.
-4. The server responds with a JSON blob describing synchronized paddle commands. Each paddle holds a direction (`up`/`down`) for half a second before flipping; the purple paddle always mirrors the green paddle so that they move in opposite directions. Commands are validated through a dataclass to keep the payload stable:
+4. The server responds with a JSON blob describing what each network decided to do (`up`, `down`, or `neutral`). Responses are validated through a dataclass so the payload is stable:
 
 ```json
 {
-  "type": "paddle_commands",
+  "type": "model_actions",
   "green": "up",
-  "purple": "down"
+  "purple": "neutral"
 }
 ```
-
-The response payload is produced from a dataclass so the field names and direction values stay validated and stable across releases.
 
 Send structured payloads when you want to annotate events or share richer state:
 
@@ -120,7 +118,7 @@ Send structured payloads when you want to annotate events or share richer state:
 
 The backend validates this shape via dataclasses. The `matrix` must be a `string[][]`, `score` holds the integer totals, `scored` indicates the last scorer (`"green"`/`"purple"`/`null`), and `debug` toggles any experimental UI diagnostics. The server flattens the matrix, converts `scored` into `green_scored`/`purple_scored` events, and keeps training the models off the derived rewards.
 
-Each round the server rewards the paddle that scores (+1) and punishes the paddle that gets scored on (-1). Staying neutral for too many consecutive frames incurs a small penalty so the agents are encouraged to move. Those rewards update a tiny DQN replay buffer for the green paddle and a one-step actor-critic optimizer for the purple paddle, so playing more frames directly improves the checkpointed models.
+Each round the server rewards the paddle that scores (+1) and punishes the paddle that gets scored on (-1). Staying neutral for too many consecutive frames incurs a small penalty so the agents are encouraged to move. Those rewards update a tiny DQN replay buffer for the green paddle and a one-step actor-critic optimizer for the purple paddle, so playing more frames directly improves the checkpointed models. Checkpoints named `green_dqn.pt` and `purple_ac.pt` are loaded when a client connects (logging “green loaded”/“purple loaded”) and saved on disconnect so progress persists across runs.
 
 Validation-only runs: start uvicorn with `SKIP_PREDICTIONS=1` (alias `SEEKING_SKIP_PREDICTIONS=1`) to disable inference/training entirely:
 

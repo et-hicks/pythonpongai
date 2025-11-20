@@ -5,8 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs
@@ -48,7 +47,6 @@ PURPLE_CHECKPOINT = RUNS_DIR / "purple_ac.pt"
 STATE_ENCODER = QuantizedStateEncoder()
 SCORE_REWARD = 1.0
 IDLE_PENALTY = 0.05
-COMMAND_INTERVAL_SECONDS = 0.5
 ALLOWED_DIRECTIONS = {"up", "down", "neutral"}
 
 
@@ -66,38 +64,6 @@ DEBUG_MODE = _env_flag("SEEKING_DEBUG", "DEBUG")
 
 GREEN_TRAINER = DQNTrainer(create_dqn_controller())
 PURPLE_TRAINER = ActorCriticTrainer(create_actor_critic_controller())
-
-
-@dataclass(slots=True)
-class CommandPayload:
-    type: str
-    green: str
-    purple: str
-
-    def __post_init__(self) -> None:
-        if not self.type:
-            raise ValueError("Payload type must be provided")
-        if self.green not in ALLOWED_DIRECTIONS:
-            raise ValueError(f"Unsupported green direction: {self.green!r}")
-        if self.purple not in ALLOWED_DIRECTIONS:
-            raise ValueError(f"Unsupported purple direction: {self.purple!r}")
-
-
-@dataclass(slots=True)
-class CommandGenerator:
-    interval: float = COMMAND_INTERVAL_SECONDS
-    current_direction: str = "up"
-    last_switch_ts: float = field(default_factory=time.monotonic)
-
-    def next_directions(self) -> tuple[str, str]:
-        now = time.monotonic()
-        elapsed = now - self.last_switch_ts
-        if elapsed >= self.interval:
-            self.current_direction = "down" if self.current_direction == "up" else "up"
-            self.last_switch_ts = now
-        green_direction = self.current_direction
-        purple_direction = "down" if green_direction == "up" else "up"
-        return green_direction, purple_direction
 
 
 def _format_payload(message: dict[str, Any]) -> str:
@@ -163,6 +129,21 @@ class ClientGamePayload:
             return None
 
         return ClientGamePayload(matrix=matrix, score=score, scored=scored, debug=debug)
+
+
+@dataclass(slots=True)
+class ModelPredictionPayload:
+    type: str
+    green: str
+    purple: str
+
+    def __post_init__(self) -> None:
+        if self.type != "model_actions":
+            raise ValueError("Prediction payload type must be 'model_actions'")
+        if self.green not in ALLOWED_DIRECTIONS:
+            raise ValueError(f"Unsupported green action: {self.green!r}")
+        if self.purple not in ALLOWED_DIRECTIONS:
+            raise ValueError(f"Unsupported purple action: {self.purple!r}")
 
 
 def _flatten_matrix(matrix: list[list[str]]) -> str:
@@ -249,15 +230,18 @@ def _load_controller_weights() -> None:
             GREEN_TRAINER.model.eval()
             GREEN_TRAINER.reset_state()
             logger.info("Loaded green DQN weights from %s", GREEN_CHECKPOINT)
+            logger.info("green loaded")
         except Exception as exc:  # pragma: no cover - defensive
             logger.error("Failed to load %s: %s", GREEN_CHECKPOINT, exc)
             GREEN_TRAINER.replace_model(create_dqn_controller())
             torch.save(GREEN_TRAINER.model.state_dict(), GREEN_CHECKPOINT)
             logger.info("Initialized fresh green DQN weights at %s", GREEN_CHECKPOINT)
+            logger.info("green loaded")
     else:
         GREEN_TRAINER.replace_model(create_dqn_controller())
         torch.save(GREEN_TRAINER.model.state_dict(), GREEN_CHECKPOINT)
         logger.info("Created initial green DQN checkpoint at %s", GREEN_CHECKPOINT)
+        logger.info("green loaded")
 
     if PURPLE_CHECKPOINT.exists():
         try:
@@ -266,15 +250,18 @@ def _load_controller_weights() -> None:
             PURPLE_TRAINER.model.eval()
             PURPLE_TRAINER.reset_state()
             logger.info("Loaded purple actor-critic weights from %s", PURPLE_CHECKPOINT)
+            logger.info("purple loaded")
         except Exception as exc:  # pragma: no cover - defensive
             logger.error("Failed to load %s: %s", PURPLE_CHECKPOINT, exc)
             PURPLE_TRAINER.replace_model(create_actor_critic_controller())
             torch.save(PURPLE_TRAINER.model.state_dict(), PURPLE_CHECKPOINT)
             logger.info("Initialized fresh purple actor-critic weights at %s", PURPLE_CHECKPOINT)
+            logger.info("purple loaded")
     else:
         PURPLE_TRAINER.replace_model(create_actor_critic_controller())
         torch.save(PURPLE_TRAINER.model.state_dict(), PURPLE_CHECKPOINT)
         logger.info("Created initial purple actor-critic checkpoint at %s", PURPLE_CHECKPOINT)
+        logger.info("purple loaded")
 
 
 def _save_controller_weights() -> None:
@@ -296,7 +283,6 @@ async def game_stream(websocket: WebSocket) -> None:
     await websocket.accept()
     _load_controller_weights()
     connection_skip = _should_skip_predictions(websocket)
-    command_generator = CommandGenerator()
     client_info = f"{websocket.client.host}:{websocket.client.port}" if websocket.client else "unknown"
     logger.info(
         "WebSocket client connected: %s (validation_mode=%s)",
@@ -341,18 +327,21 @@ async def game_stream(websocket: WebSocket) -> None:
             GREEN_TRAINER.observe(state, rewards["green"], done)
             PURPLE_TRAINER.observe(state, rewards["purple"], done)
 
-            green_direction, purple_direction = command_generator.next_directions()
-            green_action_idx = ACTION_LABELS.index(green_direction)
-            purple_action_idx = ACTION_LABELS.index(purple_direction)
+            green_action_idx, _ = GREEN_TRAINER.act(state)
+            purple_action_idx, _, _ = PURPLE_TRAINER.act(state)
 
             GREEN_TRAINER.register_action(green_action_idx)
             PURPLE_TRAINER.register_action(purple_action_idx)
 
-            payload = CommandPayload(
-                type="paddle_commands",
-                green=green_direction,
-                purple=purple_direction,
+            green_action = ACTION_LABELS[green_action_idx]
+            purple_action = ACTION_LABELS[purple_action_idx]
+
+            payload = ModelPredictionPayload(
+                type="model_actions",
+                green=green_action,
+                purple=purple_action,
             )
+            print(payload)
             await websocket.send_json(asdict(payload))
     except WebSocketDisconnect:
         logger.info("WebSocket client disconnected: %s", client_info)

@@ -97,12 +97,12 @@ Frontend experiments can stream gameplay data to a lightweight FastAPI server. T
 ```json
 {
   "type": "paddle_commands",
-  "green": {"direction": "up", "duration_ms": 500},
-  "purple": {"direction": "down", "duration_ms": 500}
+  "green": "up",
+  "purple": "down"
 }
 ```
 
-The response payload is produced from a dataclass so the field names, direction values, and durations stay validated and stable across releases.
+The response payload is produced from a dataclass so the field names and direction values stay validated and stable across releases.
 
 Send structured payloads when you want to annotate events or share richer state:
 

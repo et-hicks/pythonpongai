@@ -49,7 +49,6 @@ STATE_ENCODER = QuantizedStateEncoder()
 SCORE_REWARD = 1.0
 IDLE_PENALTY = 0.05
 COMMAND_INTERVAL_SECONDS = 0.5
-COMMAND_DURATION_MS = int(COMMAND_INTERVAL_SECONDS * 1000)
 ALLOWED_DIRECTIONS = {"up", "down", "neutral"}
 
 
@@ -62,6 +61,7 @@ def _env_flag(*names: str, default: str = "0") -> bool:
 
 
 GLOBAL_SKIP_PREDICTIONS = _env_flag("SEEKING_SKIP_PREDICTIONS", "SEEKING_VALIDATE_ONLY", default="0")
+DEBUG_MODE = _env_flag("SEEKING_DEBUG", "DEBUG")
 
 
 GREEN_TRAINER = DQNTrainer(create_dqn_controller())
@@ -69,30 +69,22 @@ PURPLE_TRAINER = ActorCriticTrainer(create_actor_critic_controller())
 
 
 @dataclass(slots=True)
-class PaddleCommand:
-    direction: str
-    duration_ms: int
-
-    def __post_init__(self) -> None:
-        if self.direction not in ALLOWED_DIRECTIONS:
-            raise ValueError(f"Unsupported paddle direction: {self.direction!r}")
-        if self.duration_ms <= 0:
-            raise ValueError("duration_ms must be positive")
-
-
-@dataclass(slots=True)
-class AlternatingCommandPayload:
+class CommandPayload:
     type: str
-    green: PaddleCommand
-    purple: PaddleCommand
+    green: str
+    purple: str
 
     def __post_init__(self) -> None:
         if not self.type:
             raise ValueError("Payload type must be provided")
+        if self.green not in ALLOWED_DIRECTIONS:
+            raise ValueError(f"Unsupported green direction: {self.green!r}")
+        if self.purple not in ALLOWED_DIRECTIONS:
+            raise ValueError(f"Unsupported purple direction: {self.purple!r}")
 
 
 @dataclass(slots=True)
-class AlternatingCommandGenerator:
+class CommandGenerator:
     interval: float = COMMAND_INTERVAL_SECONDS
     current_direction: str = "up"
     last_switch_ts: float = field(default_factory=time.monotonic)
@@ -100,10 +92,9 @@ class AlternatingCommandGenerator:
     def next_directions(self) -> tuple[str, str]:
         now = time.monotonic()
         elapsed = now - self.last_switch_ts
-        while elapsed >= self.interval:
+        if elapsed >= self.interval:
             self.current_direction = "down" if self.current_direction == "up" else "up"
-            self.last_switch_ts += self.interval
-            elapsed -= self.interval
+            self.last_switch_ts = now
         green_direction = self.current_direction
         purple_direction = "down" if green_direction == "up" else "up"
         return green_direction, purple_direction
@@ -305,7 +296,7 @@ async def game_stream(websocket: WebSocket) -> None:
     await websocket.accept()
     _load_controller_weights()
     connection_skip = _should_skip_predictions(websocket)
-    command_generator = AlternatingCommandGenerator()
+    command_generator = CommandGenerator()
     client_info = f"{websocket.client.host}:{websocket.client.port}" if websocket.client else "unknown"
     logger.info(
         "WebSocket client connected: %s (validation_mode=%s)",
@@ -357,10 +348,10 @@ async def game_stream(websocket: WebSocket) -> None:
             GREEN_TRAINER.register_action(green_action_idx)
             PURPLE_TRAINER.register_action(purple_action_idx)
 
-            payload = AlternatingCommandPayload(
+            payload = CommandPayload(
                 type="paddle_commands",
-                green=PaddleCommand(direction=green_direction, duration_ms=COMMAND_DURATION_MS),
-                purple=PaddleCommand(direction=purple_direction, duration_ms=COMMAND_DURATION_MS),
+                green=green_direction,
+                purple=purple_direction,
             )
             await websocket.send_json(asdict(payload))
     except WebSocketDisconnect:

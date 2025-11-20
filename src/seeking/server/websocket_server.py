@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs
@@ -46,6 +48,9 @@ PURPLE_CHECKPOINT = RUNS_DIR / "purple_ac.pt"
 STATE_ENCODER = QuantizedStateEncoder()
 SCORE_REWARD = 1.0
 IDLE_PENALTY = 0.05
+COMMAND_INTERVAL_SECONDS = 0.5
+COMMAND_DURATION_MS = int(COMMAND_INTERVAL_SECONDS * 1000)
+ALLOWED_DIRECTIONS = {"up", "down", "neutral"}
 
 
 def _env_flag(*names: str, default: str = "0") -> bool:
@@ -63,6 +68,47 @@ GREEN_TRAINER = DQNTrainer(create_dqn_controller())
 PURPLE_TRAINER = ActorCriticTrainer(create_actor_critic_controller())
 
 
+@dataclass(slots=True)
+class PaddleCommand:
+    direction: str
+    duration_ms: int
+
+    def __post_init__(self) -> None:
+        if self.direction not in ALLOWED_DIRECTIONS:
+            raise ValueError(f"Unsupported paddle direction: {self.direction!r}")
+        if self.duration_ms <= 0:
+            raise ValueError("duration_ms must be positive")
+
+
+@dataclass(slots=True)
+class AlternatingCommandPayload:
+    type: str
+    green: PaddleCommand
+    purple: PaddleCommand
+
+    def __post_init__(self) -> None:
+        if not self.type:
+            raise ValueError("Payload type must be provided")
+
+
+@dataclass(slots=True)
+class AlternatingCommandGenerator:
+    interval: float = COMMAND_INTERVAL_SECONDS
+    current_direction: str = "up"
+    last_switch_ts: float = field(default_factory=time.monotonic)
+
+    def next_directions(self) -> tuple[str, str]:
+        now = time.monotonic()
+        elapsed = now - self.last_switch_ts
+        while elapsed >= self.interval:
+            self.current_direction = "down" if self.current_direction == "up" else "up"
+            self.last_switch_ts += self.interval
+            elapsed -= self.interval
+        green_direction = self.current_direction
+        purple_direction = "down" if green_direction == "up" else "up"
+        return green_direction, purple_direction
+
+
 def _format_payload(message: dict[str, Any]) -> str:
     """Return a readable representation of the received websocket payload."""
     if message.get("text") is not None:
@@ -78,20 +124,91 @@ def _format_payload(message: dict[str, Any]) -> str:
     return f"<unknown payload> {message}"
 
 
-def _parse_payload(text: str) -> tuple[str | None, dict[str, bool]]:
+@dataclass(slots=True)
+class ScorePayload:
+    green: int
+    purple: int
+
+    @staticmethod
+    def from_obj(obj: Any) -> "ScorePayload | None":
+        if not isinstance(obj, dict):
+            return None
+        try:
+            green = int(obj["green"])
+            purple = int(obj["purple"])
+        except (KeyError, TypeError, ValueError):
+            return None
+        return ScorePayload(green=green, purple=purple)
+
+
+@dataclass(slots=True)
+class ClientGamePayload:
+    matrix: list[list[str]]
+    score: ScorePayload
+    scored: str | None
+    debug: bool
+
+    @staticmethod
+    def from_dict(data: dict[str, Any]) -> "ClientGamePayload | None":
+        matrix = data.get("matrix")
+        score_obj = data.get("score")
+        scored = data.get("scored")
+        debug = data.get("debug")
+
+        if not isinstance(matrix, list) or any(not isinstance(row, list) for row in matrix):
+            return None
+
+        if not isinstance(scored, (str, type(None))):
+            return None
+
+        if not isinstance(debug, bool):
+            debug = bool(debug)
+
+        score = ScorePayload.from_obj(score_obj)
+        if score is None:
+            return None
+
+        if not matrix or any(not all(isinstance(cell, str) for cell in row) for row in matrix):
+            return None
+
+        return ClientGamePayload(matrix=matrix, score=score, scored=scored, debug=debug)
+
+
+def _flatten_matrix(matrix: list[list[str]]) -> str:
+    return "\n".join(" ".join(row) for row in matrix)
+
+
+def _apply_structured_events(
+    base_events: dict[str, bool], structured: ClientGamePayload | None
+) -> dict[str, bool]:
+    if structured is None:
+        return base_events
+    events = dict(base_events)
+    if structured.scored:
+        scored = structured.scored.lower()
+        if scored == "green":
+            events["green_scored"] = True
+        elif scored == "purple":
+            events["purple_scored"] = True
+    return events
+
+
+def _parse_payload(text: str) -> tuple[str | None, dict[str, bool], ClientGamePayload | None]:
     if not text:
-        return None, {}
+        return None, {}, None
     try:
         data = json.loads(text)
     except json.JSONDecodeError:
-        return text, {}
+        return text, {}, None
     if isinstance(data, dict):
-        grid = data.get("grid")
-        events = data.get("events") or {}
-        if isinstance(grid, str):
-            return grid, _normalize_events(events)
-        return None, _normalize_events(events)
-    return text, {}
+        structured = ClientGamePayload.from_dict(data)
+        events = _normalize_events(data.get("events") or {})
+        events = _apply_structured_events(events, structured)
+        if structured:
+            grid_str = _flatten_matrix(structured.matrix)
+            return grid_str, events, structured
+        return None, events, None
+    return text, {}, None
 
 
 def _normalize_events(raw_events: Any) -> dict[str, bool]:
@@ -188,6 +305,7 @@ async def game_stream(websocket: WebSocket) -> None:
     await websocket.accept()
     _load_controller_weights()
     connection_skip = _should_skip_predictions(websocket)
+    command_generator = AlternatingCommandGenerator()
     client_info = f"{websocket.client.host}:{websocket.client.port}" if websocket.client else "unknown"
     logger.info(
         "WebSocket client connected: %s (validation_mode=%s)",
@@ -201,7 +319,15 @@ async def game_stream(websocket: WebSocket) -> None:
             formatted = _format_payload(message)
             logger.debug("Game payload from %s:\n%s", client_info, formatted)
             text_payload = message.get("text") or ""
-            grid_text, events = _parse_payload(text_payload)
+            grid_text, events, structured_payload = _parse_payload(text_payload)
+            if structured_payload:
+                logger.debug(
+                    "Client scores green=%s purple=%s scored=%s debug=%s",
+                    structured_payload.score.green,
+                    structured_payload.score.purple,
+                    structured_payload.scored,
+                    structured_payload.debug,
+                )
             skip_predictions = connection_skip
             if not grid_text:
                 continue
@@ -224,25 +350,19 @@ async def game_stream(websocket: WebSocket) -> None:
             GREEN_TRAINER.observe(state, rewards["green"], done)
             PURPLE_TRAINER.observe(state, rewards["purple"], done)
 
-            green_action, green_q_values = GREEN_TRAINER.act(state)
-            purple_action, purple_logits, purple_value = PURPLE_TRAINER.act(state)
+            green_direction, purple_direction = command_generator.next_directions()
+            green_action_idx = ACTION_LABELS.index(green_direction)
+            purple_action_idx = ACTION_LABELS.index(purple_direction)
 
-            GREEN_TRAINER.register_action(green_action)
-            PURPLE_TRAINER.register_action(purple_action)
+            GREEN_TRAINER.register_action(green_action_idx)
+            PURPLE_TRAINER.register_action(purple_action_idx)
 
-            prediction = {
-                "type": "model_actions",
-                "green": {
-                    "action": ACTION_LABELS[green_action],
-                    "q_values": green_q_values.detach().cpu().tolist(),
-                },
-                "purple": {
-                    "action": ACTION_LABELS[purple_action],
-                    "logits": purple_logits.detach().cpu().tolist(),
-                    "value": float(purple_value.detach().cpu().item()),
-                },
-            }
-            await websocket.send_json(prediction)
+            payload = AlternatingCommandPayload(
+                type="paddle_commands",
+                green=PaddleCommand(direction=green_direction, duration_ms=COMMAND_DURATION_MS),
+                purple=PaddleCommand(direction=purple_direction, duration_ms=COMMAND_DURATION_MS),
+            )
+            await websocket.send_json(asdict(payload))
     except WebSocketDisconnect:
         logger.info("WebSocket client disconnected: %s", client_info)
         _save_controller_weights()

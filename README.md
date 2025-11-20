@@ -82,7 +82,7 @@ Logs are printed through `rich` every few episodes. Edit `Trainer` to plug in ad
 
 ### WebSocket streaming backend
 
-Frontend experiments can stream gameplay data to a lightweight FastAPI server. The backend now logs each payload and feeds quantized grid snapshots through two neural controllers (Deep Q for the green paddle, actor-critic for the purple paddle). Their raw outputs are echoed back to the browser so you can immediately see what the untrained heads would decide, and the same stream is used to train the networks online.
+Frontend experiments can stream gameplay data to a lightweight FastAPI server. The backend logs each payload, feeds quantized grid snapshots through two neural controllers (Deep Q for green, actor-critic for purple), and simultaneously issues deterministic alternating commands (0.5 s up, 0.5 s down) so the UI has predictable inputs while the models continue to learn in the background.
 
 1. Install the dependencies (if you have already run `pip install -e .`, FastAPI and Uvicorn are included).
 2. Start the server:
@@ -92,24 +92,33 @@ Frontend experiments can stream gameplay data to a lightweight FastAPI server. T
    ```
 
 3. Connect from the frontend via `ws://localhost:8000/ws/game` and send the ASCII grid shown earlier (columns of `0`, paddles rendered as `|`, ball rendered as `.`). Every payload is printed, then decoded into a `(channels, rows, cols)` tensor and passed through both controllers.
-4. The server responds with a JSON blob describing the predicted paddle move for the green (DQN) and purple (actor-critic) paddles:
+4. The server responds with a JSON blob describing synchronized paddle commands. Each paddle holds a direction (`up`/`down`) for half a second before flipping; the purple paddle always mirrors the green paddle so that they move in opposite directions. Commands are validated through a dataclass to keep the payload stable:
 
 ```json
 {
-  "type": "model_actions",
-  "green": {"action": "up", "q_values": [-0.02, -0.11, 0.05]},
-  "purple": {"action": "neutral", "logits": [-0.03, 0.02, 0.12], "value": 0.004}
+  "type": "paddle_commands",
+  "green": {"direction": "up", "duration_ms": 500},
+  "purple": {"direction": "down", "duration_ms": 500}
 }
 ```
 
-Send structured payloads when you want to annotate events or disable inference:
+The response payload is produced from a dataclass so the field names, direction values, and durations stay validated and stable across releases.
+
+Send structured payloads when you want to annotate events or share richer state:
 
 ```json
 {
-  "grid": "0 0 0 | ... .",
-  "events": {"green_scored": true, "round_over": true}
+  "matrix": [
+    ["0", "0", "0", "|", "...", "."],
+    ["0", "0", "0", "0", "0", "0"]
+  ],
+  "score": {"green": 3, "purple": 5},
+  "scored": "purple",
+  "debug": false
 }
 ```
+
+The backend validates this shape via dataclasses. The `matrix` must be a `string[][]`, `score` holds the integer totals, `scored` indicates the last scorer (`"green"`/`"purple"`/`null`), and `debug` toggles any experimental UI diagnostics. The server flattens the matrix, converts `scored` into `green_scored`/`purple_scored` events, and keeps training the models off the derived rewards.
 
 Each round the server rewards the paddle that scores (+1) and punishes the paddle that gets scored on (-1). Staying neutral for too many consecutive frames incurs a small penalty so the agents are encouraged to move. Those rewards update a tiny DQN replay buffer for the green paddle and a one-step actor-critic optimizer for the purple paddle, so playing more frames directly improves the checkpointed models.
 

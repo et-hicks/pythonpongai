@@ -28,13 +28,27 @@ class ArcadeGridWorldApp(arcade.Window):
         tile_size = self.env.config.tile_pixel_size
         width = env.width * tile_size
         height = env.height * tile_size
-        super().__init__(width, height, "Seeking GridWorld", update_rate=1 / 30)
+        update_rate = 1 / 30
+        super().__init__(width, height, "Seeking GridWorld", update_rate=update_rate, draw_rate=update_rate)
         self.set_location(100, 100)
         arcade.set_background_color(env.config.colors["background"])
         self.last_reward: float = 0.0
         self.status_text: str = "Press arrow keys or WASD to move."
         self._latest_info: Optional[dict] = None
         self.env.reset()
+
+    @staticmethod
+    def draw_rectangular_outline(
+        center_x: float,
+        center_y: float,
+        width: float,
+        height: float,
+        color: arcade.Color,
+        border_width: float = 1,
+    ) -> None:
+        """Compatibility wrapper for the rectangle outline primitive."""
+
+        arcade.draw_rectangle_outline(center_x, center_y, width, height, color, border_width=border_width)
 
     # Arcade hooks ----------------------------------------------------- #
     def on_draw(self) -> None:
@@ -46,7 +60,7 @@ class ArcadeGridWorldApp(arcade.Window):
             for y in range(snapshot["height"]):
                 screen_x = x * tile + tile / 2
                 screen_y = y * tile + tile / 2
-                arcade.draw_rectangle_outline(
+                self.draw_rectangular_outline(
                     screen_x,
                     screen_y,
                     tile,

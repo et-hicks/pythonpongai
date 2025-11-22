@@ -75,7 +75,14 @@ class Fish:
 
 class FishFoodGame(arcade.Window):
     def __init__(self) -> None:
-        super().__init__(WINDOW_WIDTH, WINDOW_HEIGHT, "ASCII Fish Food", update_rate=1 / 60)
+        update_rate = 1 / 60
+        super().__init__(
+            WINDOW_WIDTH,
+            WINDOW_HEIGHT,
+            "ASCII Fish Food",
+            update_rate=update_rate,
+            draw_rate=update_rate,
+        )
         self.set_location(150, 80)
         arcade.set_background_color(BACKGROUND_COLOR)
         self.state = "mode_select"

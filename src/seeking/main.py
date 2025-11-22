@@ -64,7 +64,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Arcade + PyTorch playground.")
     parser.add_argument(
         "--mode",
-        choices=["play", "train", "pong"],
+        choices=["play", "train", "pong", "arcade"],
         default="play",
         help="Run interactive play or headless training.",
     )
@@ -317,6 +317,22 @@ def main(argv: list[str] | None = None) -> None:
                 green_shape=args.pong_green_shape,
                 purple_shape=args.pong_purple_shape,
             )
+    elif args.mode == "arcade":
+        if args.headless:
+            print("Arcade hub requires a display.", file=sys.stderr)
+            raise SystemExit(1)
+        from seeking.game.arcade_hub import launch_arcade_hub
+
+        launch_arcade_hub(
+            {
+                "device": resolved_device,
+                "green_checkpoint": args.pong_green_checkpoint,
+                "purple_checkpoint": args.pong_purple_checkpoint,
+                "default_shape": args.pong_shape,
+                "green_shape": args.pong_green_shape,
+                "purple_shape": args.pong_purple_shape,
+            }
+        )
     else:
         if args.headless:
             print("Interactive mode requires Arcade window. Remove --headless.", file=sys.stderr)

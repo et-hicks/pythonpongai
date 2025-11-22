@@ -11,7 +11,14 @@ WINDOW_HEIGHT = 800
 
 class ArcadeLauncher(arcade.Window):
     def __init__(self) -> None:
-        super().__init__(WINDOW_WIDTH, WINDOW_HEIGHT, "Arcade Hub", update_rate=1 / 60)
+        update_rate = 1 / 60
+        super().__init__(
+            WINDOW_WIDTH,
+            WINDOW_HEIGHT,
+            "Arcade Hub",
+            update_rate=update_rate,
+            draw_rate=update_rate,
+        )
         arcade.set_background_color(arcade.color.BLACK)
         self.selection: str | None = None
 

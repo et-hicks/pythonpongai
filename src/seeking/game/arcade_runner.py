@@ -46,13 +46,47 @@ class ArcadeGridWorldApp(arcade.Window):
         color: arcade.Color,
         border_width: float = 1,
     ) -> None:
-        """Compatibility wrapper for the rectangle outline primitive."""
+        """Compatibility wrapper for rectangle outlines across Arcade versions."""
 
-        arcade.draw_rectangle_outline(center_x, center_y, width, height, color, border_width=border_width)
+        if hasattr(arcade, "draw_rectangle_outline"):
+            arcade.draw_rectangle_outline(center_x, center_y, width, height, color, border_width=border_width)
+            return
+
+        # Arcade 3.x renamed the primitive to left/bottom/width/height variants.
+        if hasattr(arcade, "draw_lbwh_rectangle_outline"):
+            left = center_x - width / 2
+            bottom = center_y - height / 2
+            arcade.draw_lbwh_rectangle_outline(left, bottom, width, height, color, border_width=border_width)
+            return
+
+        raise AttributeError("No rectangle outline primitive available in this version of arcade.")
+
+    @staticmethod
+    def draw_rectangular_filled(
+        center_x: float,
+        center_y: float,
+        width: float,
+        height: float,
+        color: arcade.Color,
+    ) -> None:
+        """Compatibility wrapper for rectangle fills across Arcade versions."""
+
+        if hasattr(arcade, "draw_rectangle_filled"):
+            arcade.draw_rectangle_filled(center_x, center_y, width, height, color)
+            return
+
+        if hasattr(arcade, "draw_lbwh_rectangle_filled"):
+            left = center_x - width / 2
+            bottom = center_y - height / 2
+            arcade.draw_lbwh_rectangle_filled(left, bottom, width, height, color)
+            return
+
+        raise AttributeError("No rectangle filled primitive available in this version of arcade.")
 
     # Arcade hooks ----------------------------------------------------- #
     def on_draw(self) -> None:
-        arcade.start_render()
+        # In Arcade 3.x, start_render is for module-level scripts; Window.draw should clear instead.
+        self.clear()
         snapshot = self.env.snapshot()
         colors = self.env.config.colors
         tile = self.env.config.tile_pixel_size
@@ -69,7 +103,7 @@ class ArcadeGridWorldApp(arcade.Window):
                     border_width=1,
                 )
         for (ox, oy) in snapshot["obstacles"]:
-            arcade.draw_rectangle_filled(
+            self.draw_rectangular_filled(
                 ox * tile + tile / 2,
                 oy * tile + tile / 2,
                 tile,
@@ -77,7 +111,7 @@ class ArcadeGridWorldApp(arcade.Window):
                 colors["obstacle"],
             )
         gx, gy = snapshot["goal"]
-        arcade.draw_rectangle_filled(
+        self.draw_rectangular_filled(
             gx * tile + tile / 2,
             gy * tile + tile / 2,
             tile,
